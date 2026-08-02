@@ -1,7 +1,9 @@
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
-from ..Week2.day5_raagent import llm, tools
+import sys, os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from shared.tools import llm, tools
 
 prompt = ChatPromptTemplate.from_messages([
         ("system", "You are a helpful research agent. Reference previous questions if necessary."),
@@ -13,11 +15,11 @@ prompt = ChatPromptTemplate.from_messages([
 # Test: Ask 5 follow-up questions that reference previous answers
 # Then switch to summary_memory, repeat - compare token counts
 questions = [
-    "What medicine should I take for dust allergies?",
-    "At what dose should I take it, and how often?",
-    "Does it have any side effects I should watch out for?",
-    "Are there any foods or other medicines I should avoid while taking it?",
-    "Given everything you've told me, would you recommend I see a doctor first or just buy it over the counter?",
+    "Who was the first person to walk on the moon, and what mission was it?",
+    "How long did that mission take from launch to splashdown?",
+    "What did he say when he first stepped on the surface?",
+    "Were there other crew members on that mission? What were their roles?",
+    "Of everything you've told me about this mission, what do you think was the most technically impressive achievement?"
 ]
 
 def run_with_buffer_memory():
@@ -36,8 +38,10 @@ def run_with_buffer_memory():
 
         mem_size = len(str(chat_history))
         print(f"\nQ: {q}")
-        print(f"A: {result['output']}")
-        print(f"[memory size: {mem_size} chars]")
+        print(f"A: {result['output'][0]['text']}")
+        print(f"-- Memory size: {mem_size} chars")
+
+    return executer, chat_history
 
 
 def run_with_summary_memory():
@@ -56,14 +60,33 @@ def run_with_summary_memory():
 
         # Summarize after each turn
         summary_response = llm.invoke(
-            f"Summarize this conversation in 2 sentences:\n{summary}\nHuman: {q}\nAI: {result['output']}"
+            f"Update this running summary with the new exchange. Keep all important facts.\n"
+            f"Current summary: {summary}\n"
+            f"New exchange:\nHuman: {q}\nAI: {result['output']}"
         )
         summary = summary_response.content
 
-        mem_size = len(summary)
         print(f"\nQ: {q}")
         print(f"A: {result['output']}")
-        print(f"[summary size: {mem_size} chars]")
+        print(f"-- Current summary: {summary}")
+        print(f"-- Summary size: {len(summary)} chars")
 
-run_with_buffer_memory()
-run_with_summary_memory()
+    final_history = [AIMessage(content=f"Previous conversation summary: {summary}")]
+    return executer, final_history
+
+
+
+# Runnning each method independently to compare memory usage
+executer_buffer, buffer_history = run_with_buffer_memory()
+executer_summary, summary_history = run_with_summary_memory()
+
+
+# Verification of memory usage
+verification = "List every specific fact you remember from our conversation."
+result_buffer = executer_buffer.invoke({"input": verification, "chat_history": buffer_history})
+result_summary = executer_summary.invoke({"input": verification, "chat_history": summary_history})
+
+
+print("\n" + "="*100)
+print("BUFFER:\n", result_buffer["output"])
+print("\nSUMMARY:\n", result_summary["output"])
