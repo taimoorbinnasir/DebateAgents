@@ -2,7 +2,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 
 # Runs locally, no API key, free
-embedder = SentenceTransformer("all-MiniLM-L6-v2")  # 384-dim, fast, good enough
+embedder = SentenceTransformer("all-mpnet-base-v2")
 
 # PersistentClient saves to disk — survives process restarts
 chroma = chromadb.PersistentClient(path="./memory_db")

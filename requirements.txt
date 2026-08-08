@@ -8,3 +8,4 @@ requests
 pydantic
 chromadb
 sentence-transformers
+pypdf
