@@ -17,36 +17,48 @@ def ingest_chunks(chunks: list[str], collection_name: str, source: str):
 
 
 def ingest_document(filepath: str, collection_name: str, force: bool = False):
-    """Ingest a document into ChromaDB. Skips if already ingested unless force=True."""
     col = chroma.get_or_create_collection(collection_name)
+    doc_tag = os.path.basename(filepath)
     
-    # Skip re-ingestion unless forced — 1500 chunks takes time
-    existing = col.count()
-    if existing > 0 and not force:
-        print(f"Collection '{collection_name}' already has {existing} chunks. Skipping ingestion.")
+    # Check if THIS specific document is already ingested
+    existing = col.get(where={"source": doc_tag})
+    if existing["ids"] and not force:
+        print(f"'{doc_tag}' already ingested ({len(existing['ids'])} chunks). Skipping.")
         return
     
     text = load_pdf(filepath)
     chunks = chunk_recursive(text)
-    chunks = [c for c in chunks if is_valid_chunk(c)]  # filter artifacts
+    chunks = [c for c in chunks if is_valid_chunk(c)]
     
-    print(f"Ingesting {len(chunks)} chunks from {filepath}...")
-    
-    # Batch upsert — faster than one-by-one
+    print(f"Ingesting {len(chunks)} chunks from {doc_tag}...")
     batch_size = 50
     for i in range(0, len(chunks), batch_size):
         batch = chunks[i:i+batch_size]
-        embeddings = embedder.encode(batch).tolist()  # batch encode is faster
+        embeddings = embedder.encode(batch).tolist()
         col.upsert(
             documents=batch,
             embeddings=embeddings,
-            ids=[f"{os.path.basename(filepath)}_{i+j}" for j in range(len(batch))],
+            ids=[f"{doc_tag}_{i+j}" for j in range(len(batch))],
             metadatas=[{
-                "source": os.path.basename(filepath),
+                "source": doc_tag,
                 "chunk_index": i + j,
                 "char_count": len(chunk)
             } for j, chunk in enumerate(batch)]
         )
         print(f"  {min(i+batch_size, len(chunks))}/{len(chunks)} chunks ingested")
     
-    print(f"Done. Collection '{collection_name}' has {col.count()} chunks.")
+    print(f"Done. '{doc_tag}' ingested into '{collection_name}'.")
+
+
+
+# IMPORTANT NOTE:
+# Current ingestion process is based on filename. This allows multiple files from
+# the same collection be ingested. However, the current approach faces 2 issues:
+#   1) It will re-ingest the same file if the filename is different, even if the
+#      content is the same.
+#   2) It will not re-ingest a file if the filename is the same but the content
+#      is different.
+# The solution is to compute a hash of the file content and use that as the unique
+# identifier instead of the filename. This will ensure that the ingestion process
+# is based on the actual content of the document, preventing duplicates and ensuring
+# updates are captured.
