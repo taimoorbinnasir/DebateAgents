@@ -57,7 +57,7 @@ Question: {query}""")
 def run_qa_bot():
     # Ingest once
     ingest_document("../Resources/AI_Policy.pdf", COLLECTION)
-    ingest_document("../Resources/CBC_AIPolicy.pdf", COLLECTION)
+    ingest_document("../Resources/CBC_AI_Policy.pdf", COLLECTION)
     
     chat_history = []
     print("\n📄 EU AI Act Q&A fed on AI_Policy.pdf (type 'exit' to quit, 'history' to see chat)\n")
