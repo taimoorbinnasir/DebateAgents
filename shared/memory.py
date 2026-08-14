@@ -1,6 +1,6 @@
 import chromadb
 from sentence_transformers import SentenceTransformer
-from shared.agents import AGENTS
+from shared.agents import AGENT_PARAMS
 
 # Runs locally, no API key, free
 embedder = SentenceTransformer("all-mpnet-base-v2")
@@ -39,7 +39,7 @@ def get_agent_collection(agent_name: str):
 
 # Store an agent's statement in their private memory collection
 def store_agent_statement(agent_id: str, statement: str, round_num: int):
-    agent_name = AGENTS[agent_id]["name"]
+    agent_name = AGENT_PARAMS[agent_id]["name"]
     col = get_agent_collection(agent_name)
     embedding = embedder.encode(statement).tolist()
     col.upsert(
@@ -56,7 +56,7 @@ def store_agent_statement(agent_id: str, statement: str, round_num: int):
 
 # Retrieve an agent's own past statements relevant to a query
 def recall_agent_history(agent_id: str, query: str, n: int = 3) -> list[str]:
-    agent_name = AGENTS[agent_id]["name"]
+    agent_name = AGENT_PARAMS[agent_id]["name"]
     col = get_agent_collection(agent_name)
     
     if col.count() == 0:

@@ -5,12 +5,12 @@ from datetime import datetime
 from .memory import embedder
 from .tools import llm
 from .retrieve import retrieve_agent_sources
-from .agents import AGENTS
+from .agents import AGENT_PARAMS
 
 
 # LLM answer response
 def agent_respond_streaming(agent_id: str, shared_history: list, round_num: int) -> str:
-    config = AGENTS[agent_id]
+    config = AGENT_PARAMS[agent_id]
     sources = retrieve_agent_sources(agent_id, shared_history[-1] if shared_history else "", n=2)
     
     source_context = "\n".join([
@@ -44,7 +44,7 @@ Respond as {config['name']} in 3-5 sentences. Be direct and in character."""
 # Save resources by each agent in relevant files
 def save_agent_resources(agent_id: str, topic: str, results: list[dict]):
     """Save raw search results to ../Resources/<agent_id>/"""
-    agent_name = AGENTS[agent_id]["name"]
+    agent_name = AGENT_PARAMS[agent_id]["name"]
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     resource_dir = os.path.join(project_root, "Resources", agent_name)
     os.makedirs(resource_dir, exist_ok=True)

@@ -1,11 +1,11 @@
 import os, sys, requests, re
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from .agents import AGENTS
+from .agents import AGENT_PARAMS
 
 
 # Build a personality-biased search query for each agent
 def build_search_query(agent_id: str, topic: str) -> str:
-    bias = AGENTS[agent_id]["search_bias"].replace("{topic}", topic)
+    bias = AGENT_PARAMS[agent_id]["search_bias"].replace("{topic}", topic)
     return bias
 
 
