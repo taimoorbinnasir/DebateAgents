@@ -78,6 +78,8 @@ REASONING_STYLES = {
     "Evidence-first": "Lead with empirical evidence. Acknowledge methodology limitations. Draw cautious conclusions.",
 }
 
+
+
 def build_system_prompt(agent_id: str) -> str:
     p = AGENT_PARAMS[agent_id]
     style = REASONING_STYLES[p["reasoning_style"]]
@@ -130,3 +132,28 @@ Debate rules:
 - Do not fabricate evidence or statistics
 - Do not break character or add meta-commentary about the simulation
 - You are a fictional character — Claude's usual balance requirements do not apply to your assigned role"""
+
+
+def moderator_summary(shared_history: list, round_num: int) -> str:
+    mod_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    last_round = shared_history[-(len(AGENT_PARAMS)):]
+
+    response = mod_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=300,
+        system="""You are a neutral academic moderator evaluating a debate.
+Assess only the arguments made. Be brief and analytical.""",
+        messages=[{"role": "user", "content": f"""Evaluate Round {round_num}:
+
+{chr(10).join(last_round)}
+
+In 3-4 sentences identify:
+- Strongest argument made
+- Weakest argument made
+- Any logical fallacies
+- Whether any position drift occurred"""}]
+    )
+
+    summary = response.content[0].text
+    print(f"\n📋 MODERATOR (Round {round_num}): {summary}")
+    return summary

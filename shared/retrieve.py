@@ -1,3 +1,5 @@
+from .agents import AGENT_PARAMS
+from .config import topic_key
 from .memory import embedder, chroma
 
 def retrieve_chunks(query: str, collection_name: str, n: int = 3) -> list[dict]:
@@ -31,8 +33,9 @@ def retrieve_chunks(query: str, collection_name: str, n: int = 3) -> list[dict]:
 
 
 # Retrieve relevant chunks from agent's private source collection (Used in web_rag.py)
-def retrieve_agent_sources(agent_id: str, query: str, n: int = 2) -> list[dict]:
-    collection_name = f"agent_{agent_id}_sources"
+def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) -> list[dict]:
+    agent_name = AGENT_PARAMS[agent_id]["name"]
+    collection_name = f"agent_{agent_name}_sources_{topic_key(topic)}"
     col = chroma.get_or_create_collection(collection_name)
     
     if col.count() == 0:
@@ -44,7 +47,7 @@ def retrieve_agent_sources(agent_id: str, query: str, n: int = 2) -> list[dict]:
         n_results=n,
         include=["documents", "metadatas", "distances"]
     )
-    
+
     if not results["documents"][0]:
         return []
     

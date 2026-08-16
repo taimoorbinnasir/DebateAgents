@@ -1,3 +1,5 @@
+import hashlib
+
 # Basic
 MODEL = "claude-haiku-4-5"
 MAX_TOKENS = 500
@@ -12,3 +14,7 @@ OUTPUT_COST_PER_M = 4.0
 NUM_ROUNDS = 10
 NUM_PRO_AGENTS = 3
 NUM_CON_AGENTS = 3
+
+
+def topic_key(topic: str) -> str:
+    return hashlib.md5(topic.lower().strip().encode()).hexdigest()[:8]

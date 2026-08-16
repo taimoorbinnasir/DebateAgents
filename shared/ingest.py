@@ -1,9 +1,11 @@
 import os
+from .agents import AGENT_PARAMS
 from .chunker import chunk_recursive, is_valid_chunk
-from .memory import embedder, chroma
+from .config import topic_key
 from .load_doc import load_pdf
-from .web_rag import save_agent_resources
+from .memory import embedder, chroma
 from .search import build_search_query, search_web, fetch_url_content
+from .web_rag import save_agent_resources
 
 
 def ingest_chunks(chunks: list[str], collection_name: str, source: str):
@@ -77,16 +79,17 @@ def ingest_document(filepath: str, collection_name: str, force: bool = False):
 
 
 # Search web, fetch content, ingest into agent's private collection
-def ingest_agent_sources(agent_id: str, topic: str):
+def ingest_agent_sources(agent_id: str, topic: str, session_id: str = None):
     # ---------------------------- WEB SEARCH ----------------------------
     # ------ Check if topic already ingested
-    collection_name = f"agent_{agent_id}_sources"
+    agent_name = AGENT_PARAMS[agent_id]["name"]
+    collection_name = f"agent_{agent_name}_sources_{topic_key(topic)}"
     col = chroma.get_or_create_collection(collection_name)
     
     # Skip if already ingested for this topic
     existing = col.get(where={"topic": topic})
     if existing["ids"]:
-        print(f"  {agent_id}: sources already ingested for topic '{topic}'")
+        print(f"  {agent_name}: sources already ingested for '{topic}'")
         return
 
     # ------ Build search query and search
