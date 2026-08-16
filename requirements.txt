@@ -9,3 +9,7 @@ pydantic
 chromadb
 sentence-transformers
 pypdf
+fitz
+fastapi
+uvicorn
+python-multipart

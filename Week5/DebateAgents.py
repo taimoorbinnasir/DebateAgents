@@ -1,4 +1,5 @@
 import sys, os, random, uuid
+import queue as q
 from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -119,6 +120,69 @@ def run_simulation(topic: str, max_rounds: int = 10):
             break
 
     conclude_simulation(topic, shared_history, extremity_log, stop_reason)
+
+
+# ===================== SIMULATION LOOP FOR BACKEND =====================
+# Simulation loop that pushes events to a queue instead of printing
+def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_queue=None):
+    # If no queue provided, fall back to print behavior
+    def push(event: dict):
+        if event_queue:
+            from backend.manager import push_event
+            push_event(session_id, event)
+        else:
+            print(event)  # fallback for terminal runs
+    
+    shared_history = [f"TOPIC: {topic}"]
+    extremity_log  = {agent_id: [] for agent_id in AGENT_PARAMS}
+    stop_reason    = f"Maximum rounds ({max_rounds}) reached"
+    pro_agents     = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "pro"]
+    con_agents     = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "con"]
+
+    # Ingest sources
+    for agent_id in AGENT_PARAMS:
+        ingest_agent_sources(agent_id, topic, session_id)
+
+    for round_num in range(1, max_rounds + 1):
+        push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})
+        
+        random.shuffle(pro_agents)
+        random.shuffle(con_agents)
+        turn_order = [x for pair in zip(pro_agents, con_agents) for x in pair]
+
+        for agent_id in turn_order:
+            reply = agent_respond(agent_id, shared_history, round_num, session_id)
+            statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
+            shared_history.append(statement)
+            store_agent_statement(agent_id, reply, round_num, session_id)
+            score = score_extremity(agent_id, reply)
+            extremity_log[agent_id].append(score)
+
+            # Push agent statement event
+            push({
+                "type":       "agent_statement",
+                "agent_id":   agent_id,
+                "agent_name": AGENT_PARAMS[agent_id]["name"],
+                "stance":     AGENT_PARAMS[agent_id]["stance"],
+                "round_num":  round_num,
+                "text":       reply,
+                "extremity":  score
+            })
+
+        # Moderator after each round
+        mod_text = moderator_summary(shared_history, round_num)
+        shared_history.append(f"MODERATOR: {mod_text}")
+        push({"type": "moderator_summary", "round": round_num, "text": mod_text})
+
+        push({"type": "round_end", "round": round_num})
+
+        stop, reason = should_stop(shared_history, round_num, max_rounds)
+        if stop:
+            stop_reason = reason
+            break
+
+    conclude_simulation(topic, shared_history, extremity_log, stop_reason)
+    push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 
 # ===================== ENTRY POINT =====================

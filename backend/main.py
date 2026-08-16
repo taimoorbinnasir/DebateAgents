@@ -1,0 +1,83 @@
+import sys, os, uuid
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from backend.models import (
+    SimulationRequest, SimulationStatus,
+    SimulationTranscript, SimulationMeta
+)
+from fastapi import Request
+import backend.manager as manager
+from .sse import simulation_stream
+
+app = FastAPI(title="Debate Simulation API")
+
+# CORS — allow Vite dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/simulation/start")
+def start_simulation(req: SimulationRequest):
+    session_id = str(uuid.uuid4())[:8]
+    manager.start_simulation(session_id, req.topic, req.max_rounds)
+    return {"session_id": session_id, "status": "started"}
+
+
+@app.get("/simulation/{session_id}/status", response_model=SimulationStatus)
+def get_status(session_id: str):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return SimulationStatus(
+        session_id=    sim["session_id"],
+        topic=         sim["topic"],
+        status=        sim["status"],
+        current_round= sim["current_round"],
+        max_rounds=    sim["max_rounds"],
+        stop_reason=   sim["stop_reason"],
+        extremity_log= sim["extremity_log"]
+    )
+
+
+@app.get("/simulation/{session_id}/transcript", response_model=SimulationTranscript)
+def get_transcript(session_id: str):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return SimulationTranscript(
+        session_id=    sim["session_id"],
+        topic=         sim["topic"],
+        stop_reason=   sim["stop_reason"] or "",
+        transcript=    sim["transcript"],
+        extremity_log= sim["extremity_log"]
+    )
+
+
+@app.get("/simulations", response_model=list[SimulationMeta])
+def list_simulations():
+    return manager.get_all_simulations()
+
+
+@app.get("/simulation/{session_id}/stream")
+async def stream_simulation(session_id: str, request: Request):
+    return await simulation_stream(request, session_id, manager)
+
+
+@app.get("/simulation/{session_id}/events")
+def get_events(session_id: str):
+    """Return all events for an active in-memory simulation."""
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return {"events": sim["events"]}
