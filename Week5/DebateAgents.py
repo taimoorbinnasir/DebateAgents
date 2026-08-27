@@ -132,6 +132,9 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
             push_event(session_id, event)
         else:
             print(event)  # fallback for terminal runs
+
+    # Push research phase start
+    push({"type": "research_start", "total_agents": len(AGENT_PARAMS)})
     
     shared_history = [f"TOPIC: {topic}"]
     extremity_log  = {agent_id: [] for agent_id in AGENT_PARAMS}
@@ -140,8 +143,16 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
     con_agents     = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "con"]
 
     # Ingest sources
-    for agent_id in AGENT_PARAMS:
+    for i, agent_id in enumerate(AGENT_PARAMS):
         ingest_agent_sources(agent_id, topic, session_id)
+        push({
+            "type": "research_progress",
+            "completed": i + 1,
+            "total": len(AGENT_PARAMS),
+            "agent_name": AGENT_PARAMS[agent_id]["name"]
+        })
+    
+    push({"type": "research_complete"})
 
     for round_num in range(1, max_rounds + 1):
         push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})

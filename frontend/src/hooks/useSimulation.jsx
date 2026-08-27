@@ -4,11 +4,12 @@ import { startSimulation, openStream } from "../api/simulation"
 
 export default function useSimulation() {
   const [sessionId, setSessionId]     = useState(null)
-  const [status, setStatus]           = useState("idle")  // idle|running|complete
+  const [status, setStatus]           = useState("idle")
   const [events, setEvents]           = useState([])
   const [agents, setAgents]           = useState(initAgents())
   const [moderatorSummaries, setModerator] = useState([])
   const [maxRounds, setMaxRoundsState] = useState(5)
+  const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })  // ← add this line
   const esRef = useRef(null)
 
   function initAgents() {
@@ -24,6 +25,19 @@ export default function useSimulation() {
 
   const handleEvent = (event) => {
     setEvents(prev => [...prev, event])
+
+    if (event.type === "research_start") {
+      setStatus("researching")
+      setResearchProgress({ completed: 0, total: event.total_agents })
+    }
+
+    if (event.type === "research_progress") {
+      setResearchProgress({ completed: event.completed, total: event.total })
+    }
+
+    if (event.type === "research_complete") {
+      setStatus("running")
+    }
 
     if (event.type === "agent_statement") {
       setAgents(prev => ({
@@ -68,6 +82,6 @@ export default function useSimulation() {
 
   return {
     sessionId, status, events, agents,
-    moderatorSummaries, maxRounds, start
+    moderatorSummaries, maxRounds, researchProgress, start
   }
 }

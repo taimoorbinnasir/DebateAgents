@@ -7,7 +7,7 @@ import ModeratorPanel from "./components/ModeratorPanel"
 export default function App() {
   const {
     status, events, agents,
-    moderatorSummaries, maxRounds, start
+    moderatorSummaries, maxRounds, researchProgress, start
   } = useSimulation()
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
@@ -18,14 +18,17 @@ export default function App() {
       <div className="max-w-7xl mx-auto">
 
         {/* Topic form */}
-        <TopicForm onStart={start} disabled={status === "running"} />
+        <TopicForm onStart={start} disabled={status === "researching" || status === "running"} />
 
         {/* Status bar */}
         {status !== "idle" && (
           <div className={`text-xs text-center py-1 mb-3 rounded font-medium
-            ${status === "running"  ? "bg-yellow-50 text-yellow-700" : ""}
-            ${status === "complete" ? "bg-green-50 text-green-700"   : ""}
-            ${status === "error"    ? "bg-red-50 text-red-700"       : ""}`}>
+            ${status === "researching" ? "bg-blue-50 text-blue-700"   : ""}
+            ${status === "running"     ? "bg-yellow-50 text-yellow-700" : ""}
+            ${status === "complete"    ? "bg-green-50 text-green-700"   : ""}
+            ${status === "error"       ? "bg-red-50 text-red-700"       : ""}`}>
+            {status === "researching" && 
+              `🔍 Agents researching... (${researchProgress.completed}/${researchProgress.total})`}
             {status === "running"  && "⏳ Debate in progress..."}
             {status === "complete" && "✅ Debate complete"}
             {status === "error"    && "❌ Simulation error"}
@@ -53,7 +56,6 @@ export default function App() {
               DEBATE FEED
             </div>
             <DebateFeed events={events} maxRounds={maxRounds} />
-            <ModeratorPanel summaries={moderatorSummaries} />
           </div>
 
           {/* CON agents */}
@@ -64,6 +66,9 @@ export default function App() {
             {conAgents.map(([id, agent]) => (
               <AgentCard key={id} agent={agent} />
             ))}
+
+            {/* ModeratorPanel now rendered at root level — fixed positioning works correctly */}
+            <ModeratorPanel summaries={moderatorSummaries} />
           </div>
 
         </div>

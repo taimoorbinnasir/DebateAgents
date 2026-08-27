@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import RoundHeader from "./RoundHeader"
+import FormattedText from "./FormattedText"
 
 const STANCE_BUBBLE = {
   pro: "bg-green-50 border-green-200 text-green-900",
@@ -32,17 +33,14 @@ export default function DebateFeed({ events, maxRounds }) {
 
         if (event.type === "agent_statement") {
           const bubbleStyle = STANCE_BUBBLE[event.stance] || STANCE_BUBBLE.pro
-          const align = event.stance === "pro" ? "mr-8" : "ml-8"
           return (
-            <div key={i} className={`mb-3 ${align}`}>
-              <div className={`border rounded-lg p-3 ${bubbleStyle}`}>
+            <div key={i} className="mb-3">
+              <div className={`border rounded-lg p-3 ${bubbleStyle} text-left`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-semibold">{event.agent_name}</span>
-                  <span className="text-xs opacity-60">
-                    extremity {event.extremity}/10
-                  </span>
+                  <span className="text-xs opacity-60">extremity {event.extremity}/10</span>
                 </div>
-                <p className="text-sm leading-relaxed">{event.text}</p>
+                <FormattedText text={event.text} />
               </div>
             </div>
           )

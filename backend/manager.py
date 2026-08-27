@@ -84,12 +84,17 @@ def _run_simulation_thread(session_id: str, topic: str,
             event_queue=event_queue
         )
     except Exception as e:
+        # _simulations[session_id]["status"] = "error"
+        # _simulations[session_id]["stop_reason"] = str(e)
+        # event_queue.put({
+        #     "type":  "error",
+        #     "error": str(e)
+        # })
+        import traceback
+        traceback.print_exc()
         _simulations[session_id]["status"] = "error"
         _simulations[session_id]["stop_reason"] = str(e)
-        event_queue.put({
-            "type":  "error",
-            "error": str(e)
-        })
+        event_queue.put({"type": "error", "error": str(e)})
     finally:
         # Signal SSE stream to close
         event_queue.put({"type": "simulation_complete"})

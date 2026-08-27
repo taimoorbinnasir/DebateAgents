@@ -1,3 +1,7 @@
+from anthropic import Anthropic
+import os, sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 AGENT_PARAMS = {
     "pro_hardliner": {
         "name": "Aggro",
