@@ -30,3 +30,15 @@ export const openStream = (sessionId, onEvent) => {
   es.onerror   = () => es.close()
   return es  // caller is responsible for closing
 }
+
+export const getSavedSimulation = async (timestamp) => {
+  const res = await fetch(`${BASE}/simulations/${timestamp}/detail`)
+  if (!res.ok) throw new Error("Simulation not found")
+  return res.json()
+}
+
+export const getReport = async (timestamp) => {
+  const res = await fetch(`${BASE}/simulations/${timestamp}/report`)
+  if (!res.ok) throw new Error("Report not found")
+  return res.json()  // { content: "..." }
+}

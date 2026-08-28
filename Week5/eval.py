@@ -36,7 +36,7 @@ def print_extremity_chart(extremity_log: dict):
 
 # ===================== CONCLUSION =====================
 def conclude_simulation(topic: str, shared_history: list,
-                        extremity_log: dict, stop_reason: str):
+                        extremity_log: dict, stop_reason: str, session_id: str):
     transcript   = "\n".join(shared_history)
     scores_text  = "\n".join([
         f"{AGENT_PARAMS[aid]['name']}: {scores}"
@@ -76,7 +76,8 @@ Transcript:
     os.makedirs(output_dir, exist_ok=True)
     timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    transcript_path = os.path.join(output_dir, f"transcript_{timestamp}.json")
+    transcript_path = os.path.join(output_dir, f"transcript_{session_id}.json")
+    report_path     = os.path.join(output_dir, f"report_{session_id}.md")
     with open(transcript_path, "w") as f:
         json.dump({
             "topic":         topic,

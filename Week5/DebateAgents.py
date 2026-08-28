@@ -119,7 +119,7 @@ def run_simulation(topic: str, max_rounds: int = 10):
             print(f"\n🛑 {stop_reason}")
             break
 
-    conclude_simulation(topic, shared_history, extremity_log, stop_reason)
+    conclude_simulation(topic, shared_history, extremity_log, stop_reason, session_id)
 
 
 # ===================== SIMULATION LOOP FOR BACKEND =====================
@@ -192,7 +192,7 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
             stop_reason = reason
             break
 
-    conclude_simulation(topic, shared_history, extremity_log, stop_reason)
+    conclude_simulation(topic, shared_history, extremity_log, stop_reason, session_id)
     push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 

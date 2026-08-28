@@ -2,6 +2,7 @@ import { useState, useRef } from "react"
 import { startSimulation, openStream } from "../api/simulation"
 // import { AGENT_PARAMS_FRONTEND } from "../constants/agents"
 
+
 export default function useSimulation() {
   const [sessionId, setSessionId]     = useState(null)
   const [status, setStatus]           = useState("idle")
@@ -10,6 +11,7 @@ export default function useSimulation() {
   const [moderatorSummaries, setModerator] = useState([])
   const [maxRounds, setMaxRoundsState] = useState(5)
   const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })  // ← add this line
+  const [extremityLog, setExtremityLog] = useState({})
   const esRef = useRef(null)
 
   function initAgents() {
@@ -40,6 +42,11 @@ export default function useSimulation() {
     }
 
     if (event.type === "agent_statement") {
+      setExtremityLog(prev => ({
+        ...prev,
+        [event.agent_id]: [...(prev[event.agent_id] || []), event.extremity]
+      }))
+
       setAgents(prev => ({
         ...prev,
         [event.agent_id]: {
@@ -67,6 +74,7 @@ export default function useSimulation() {
 
   const start = async (topic, rounds) => {
     // Reset state
+    setExtremityLog({})
     setEvents([])
     setAgents(initAgents())
     setModerator([])
@@ -81,7 +89,7 @@ export default function useSimulation() {
   }
 
   return {
-    sessionId, status, events, agents,
+    sessionId, status, events, agents, extremityLog,
     moderatorSummaries, maxRounds, researchProgress, start
   }
 }

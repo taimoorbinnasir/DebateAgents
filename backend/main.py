@@ -1,13 +1,12 @@
-import sys, os, uuid
+import sys, os, uuid, json
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from backend.models import (
     SimulationRequest, SimulationStatus,
     SimulationTranscript, SimulationMeta
 )
-from fastapi import Request
 import backend.manager as manager
 from .sse import simulation_stream
 
@@ -81,3 +80,38 @@ def get_events(session_id: str):
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation not found")
     return {"events": sim["events"]}
+
+
+
+@app.get("/simulations/{timestamp}/detail", response_model=SimulationTranscript)
+def get_saved_simulation(timestamp: str):
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filepath = os.path.join(project_root, "Resources", "simulations", f"transcript_{timestamp}.json")
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Simulation transcript not found")
+    
+    with open(filepath) as f:
+        data = json.load(f)
+    
+    return SimulationTranscript(
+        session_id=    timestamp,
+        topic=         data.get("topic", ""),
+        stop_reason=   data.get("stop_reason", ""),
+        transcript=    data.get("transcript", []),
+        extremity_log= data.get("extremity_log", {})
+    )
+
+
+@app.get("/simulations/{timestamp}/report")
+def get_report(timestamp: str):
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filepath = os.path.join(project_root, "Resources", "simulations", f"report_{timestamp}.md")
+    
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    with open(filepath) as f:
+        content = f.read()
+    
+    return {"content": content}
