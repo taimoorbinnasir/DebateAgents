@@ -151,7 +151,9 @@ DebateAgents/
 - [ ] Claude Code refactor pass on the codebase
 - [ ] Batch runner script — multiple simulations, different seeds, comparative output
 - [ ] GitHub Actions — automated nightly run on a fixed topic
+- [ ] Brainstorm ideas on how to manage API costings to prevent usage depletion
 - [ ] Deploy (Vercel for frontend, Railway/Render for backend) — **last step**, after all features above are complete
+
 
 ## Status
 
