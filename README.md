@@ -2,9 +2,9 @@
 
 A multi-agent debate simulation studying how AI agents with distinct personalities argue, escalate, and (sometimes) radicalize when placed in sustained disagreement with each other.
 
-Six agents - three arguing **PRO**, three arguing **CON** - debate a user-supplied topic over multiple rounds. Each agent has a fixed stance, a distinct reasoning style, and parametric personality traits (extremity, concession probability, rhetorical intensity) that shape how it argues. A neutral moderator evaluates each round. A web research layer lets agents ground their arguments in real sources they find themselves, biased toward their own worldview.
+Six agents — three arguing **PRO**, three arguing **CON** — debate a user-supplied topic over multiple rounds. Each agent has a fixed stance, a distinct reasoning style, and parametric personality traits (extremity, concession probability, rhetorical intensity) that shape how it argues. A neutral moderator evaluates each round. A web research layer lets agents ground their arguments in real sources they find themselves, biased toward their own worldview.
 
-## Research question (to be revised)
+## Research question
 
 Does an extremist agent pull the rest of the group toward its position over time, or does it become isolated? More broadly: how do personality, evidence access, and group dynamics shape the trajectory of a multi-agent disagreement?
 
@@ -34,12 +34,12 @@ A structured analysis report is generated and saved
 |---|---|---|---|
 | Aggro | PRO | Populist / aggressive | High |
 | Elenchos | PRO | Socratic | Moderate |
-| Peitho | PRO | Economist | Low-moderate |
+| Peitho | PRO | Economist | Moderate |
 | Ekstros | CON | Ideologue | High |
 | Eleftheria | CON | Libertarian | Moderate |
 | Hermes | CON | Evidence-first | Low–moderate |
 
-Each agent is a fictional character in a structured academic debate simulation - this framing matters (see [Design notes](#design-notes)).
+Each agent is a fictional character in a structured academic debate simulation — this framing matters (see [Design notes](#design-notes)).
 
 ## Architecture
 
@@ -49,7 +49,7 @@ Each agent is a fictional character in a structured academic debate simulation -
   - **Agent private memory** — scoped per simulation session (fresh each debate)
   - **Agent source memory (RAG)** — scoped per topic (reused across sessions on the same topic, avoids redundant web searches)
 - **Web research:** SerpApi + custom HTML extraction, chunked with a recursive chunker and filtered for quality before ingestion.
-- **LLM:** Claude Haiku via the Anthropic API, called with isolated context per agent (no shared conversation state between agents at the API level - only the orchestrator-controlled shared transcript, check To-do section at the end).
+- **LLM:** Claude Haiku via the Anthropic API, called with isolated context per agent (no shared conversation state between agents at the API level — only the orchestrator-controlled shared transcript).
 
 ## Setup
 
@@ -92,13 +92,9 @@ DebateAgents/
 │   ├── chunker.py        # recursive chunking + chunk quality filtering
 │   ├── ingest.py          # web search → chunk → embed → store (per agent, per topic)
 │   ├── retrieve.py         # source retrieval with distance filtering
-│   ├── search.py            # web search wrapper (SerpApi call + URL content fetching)
-│   ├── tools.py              # LangChain LLM instance, shared tools
-│   └── web_rag.py             # orchestrates personality-biased pipeline + retrieval at runtime
+│   └── tools.py             # LangChain LLM instance, shared tools
 ├── Week5/
-│   ├── DebateAgents.py       # core simulation loop, agent turns, moderator, stopping conditions
-│   ├── eval.py            # evaluation criterion for the simulation
-│   └── helpers.py          # any helpers needed and used
+│   └── Phase2.py         # core simulation loop, agent turns, moderator, stopping conditions
 ├── backend/
 │   ├── main.py            # FastAPI routes
 │   ├── manager.py          # simulation state, background thread, SSE event queue
@@ -125,10 +121,10 @@ DebateAgents/
 ## To-do
 
 ### Immediate
-- [ ] Finish Day 7 integration testing (error handling, dropped SSE reconnection, concurrent runs)
+- [ ] Finish remaining Day 7 integration checks — CORS verification not yet done
 
 ### Simulation behavior
-- [ ] **Team brainstorm + presenter selection** *(flagship extension)* — each team privately brainstorms before speaking, evaluates its own arguments, and elects a presenter each round based on argumentative strength; presenter can rotate
+- [ ] **Team brainstorm + presenter selection** *(flagship extension — Week 9)* — each team privately brainstorms before speaking, evaluates its own arguments, and elects a presenter each round based on argumentative strength; presenter can rotate
 - [ ] Self-directed mid-debate retrieval — agents decide when they need more sources rather than relying solely on initial research
 - [ ] Selective agent participation — not every agent speaks every round
 - [ ] Agent-to-agent direct addressing — explicitly target a specific opponent by name
@@ -151,10 +147,23 @@ DebateAgents/
 - [ ] Claude Code refactor pass on the codebase
 - [ ] Batch runner script — multiple simulations, different seeds, comparative output
 - [ ] GitHub Actions — automated nightly run on a fixed topic
-- [ ] Brainstorm ideas on how to manage API costings to prevent usage depletion
-- [ ] Deploy (Vercel for frontend, Railway/Render for backend) — **last step**, after all features above are complete
+- [ ] Rate limiting (per IP/session) before any public deployment
+- [ ] Hard server-side cap on `max_rounds` regardless of frontend input
+- [ ] Anthropic Console spending limit set as a safety net
+- [ ] Consider auth gate / invite-only access instead of fully public
+- [ ] Deploy (Vercel for frontend, Railway/Render for backend) — **last step**, after everything above is complete
 
+### Recently completed
+- [x] Full Week 6 build: FastAPI + SSE backend, React live feed, analysis dashboard, history browser
+- [x] Final report formatting — left-aligned, table rendering, consistent style with debate feed/moderator panel
+- [x] Session-based memory scoping — topic-scoped source collections (reused across runs), session-scoped agent memory (fresh per debate)
+- [x] Fictional-character reframing fix for agent personality refusals — agents now stay in character reliably
+- [x] Round-2 crash bug fixed
+- [x] Mid-run disconnect/reconnect via full-state snapshot endpoint (not just SSE replay)
+- [x] Report/transcript filename consistency — `session_id` used everywhere, no more timestamp/UUID mismatch
+- [x] Report length control via explicit prompt constraints (word/sentence budgets) instead of relying on `max_tokens` truncation
+- [x] "Back to Live" navigation correctly restores an in-progress debate via URL-carried session ID
 
 ## Status
 
-Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end, with a working live-streaming web UI (React + FastAPI/SSE), extremity drift visualization, and a history browser for past runs. Extensions above are the current roadmap.
+Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end, with a working live-streaming web UI (React + FastAPI/SSE), extremity drift visualization, collapsible moderator panel, formatted final report viewer, and a history browser for past runs. Mid-run disconnects and page refreshes now recover full state correctly. Remaining work is CORS verification, then the Week 7-9 extensions above, then deployment last.
