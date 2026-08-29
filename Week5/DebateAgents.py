@@ -139,61 +139,67 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
     shared_history = [f"TOPIC: {topic}"]
     extremity_log  = {agent_id: [] for agent_id in AGENT_PARAMS}
     stop_reason    = f"Maximum rounds ({max_rounds}) reached"
+
     pro_agents     = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "pro"]
     con_agents     = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "con"]
 
-    # Ingest sources
-    for i, agent_id in enumerate(AGENT_PARAMS):
-        ingest_agent_sources(agent_id, topic, session_id)
-        push({
-            "type": "research_progress",
-            "completed": i + 1,
-            "total": len(AGENT_PARAMS),
-            "agent_name": AGENT_PARAMS[agent_id]["name"]
-        })
-    
-    push({"type": "research_complete"})
-
-    for round_num in range(1, max_rounds + 1):
-        push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})
-        
-        random.shuffle(pro_agents)
-        random.shuffle(con_agents)
-        turn_order = [x for pair in zip(pro_agents, con_agents) for x in pair]
-
-        for agent_id in turn_order:
-            reply = agent_respond(agent_id, shared_history, round_num, session_id)
-            statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
-            shared_history.append(statement)
-            store_agent_statement(agent_id, reply, round_num, session_id)
-            score = score_extremity(agent_id, reply)
-            extremity_log[agent_id].append(score)
-
-            # Push agent statement event
+    try:
+        # Ingest sources
+        for i, agent_id in enumerate(AGENT_PARAMS):
+            ingest_agent_sources(agent_id, topic, session_id)
             push({
-                "type":       "agent_statement",
-                "agent_id":   agent_id,
-                "agent_name": AGENT_PARAMS[agent_id]["name"],
-                "stance":     AGENT_PARAMS[agent_id]["stance"],
-                "round_num":  round_num,
-                "text":       reply,
-                "extremity":  score
+                "type": "research_progress",
+                "completed": i + 1,
+                "total": len(AGENT_PARAMS),
+                "agent_name": AGENT_PARAMS[agent_id]["name"]
             })
+        
+        push({"type": "research_complete"})
 
-        # Moderator after each round
-        mod_text = moderator_summary(shared_history, round_num)
-        shared_history.append(f"MODERATOR: {mod_text}")
-        push({"type": "moderator_summary", "round": round_num, "text": mod_text})
+        for round_num in range(1, max_rounds + 1):
+            push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})
+            
+            random.shuffle(pro_agents)
+            random.shuffle(con_agents)
+            turn_order = [x for pair in zip(pro_agents, con_agents) for x in pair]
 
-        push({"type": "round_end", "round": round_num})
+            for agent_id in turn_order:
+                reply = agent_respond(agent_id, shared_history, round_num, session_id)
+                statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
+                shared_history.append(statement)
+                store_agent_statement(agent_id, reply, round_num, session_id)
+                score = score_extremity(agent_id, reply)
+                extremity_log[agent_id].append(score)
 
-        stop, reason = should_stop(shared_history, round_num, max_rounds)
-        if stop:
-            stop_reason = reason
-            break
+                # Push agent statement event
+                push({
+                    "type":       "agent_statement",
+                    "agent_id":   agent_id,
+                    "agent_name": AGENT_PARAMS[agent_id]["name"],
+                    "stance":     AGENT_PARAMS[agent_id]["stance"],
+                    "round_num":  round_num,
+                    "text":       reply,
+                    "extremity":  score
+                })
 
-    conclude_simulation(topic, shared_history, extremity_log, stop_reason, session_id)
-    push({"type": "simulation_complete", "stop_reason": stop_reason})
+            # Moderator after each round
+            mod_text = moderator_summary(shared_history, round_num)
+            shared_history.append(f"MODERATOR: {mod_text}")
+            push({"type": "moderator_summary", "round": round_num, "text": mod_text})
+
+            push({"type": "round_end", "round": round_num})
+
+            stop, reason = should_stop(shared_history, round_num, max_rounds)
+            if stop:
+                stop_reason = reason
+                break
+    except Exception as e:
+        stop_reason = f"Simulation interrupted: {str(e)}"
+        push({"type": "error", "error": str(e)})
+    finally:
+        # ALWAYS save whatever we have, even if interrupted
+        conclude_simulation(topic, shared_history, extremity_log, stop_reason, session_id)
+        push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 
 # ===================== ENTRY POINT =====================

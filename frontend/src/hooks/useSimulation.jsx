@@ -1,7 +1,5 @@
-import { useState, useRef } from "react"
-import { startSimulation, openStream } from "../api/simulation"
-// import { AGENT_PARAMS_FRONTEND } from "../constants/agents"
-
+import { useState, useRef, useEffect } from "react"
+import { startSimulation, openStream, getSnapshot } from "../api/simulation"
 
 export default function useSimulation() {
   const [sessionId, setSessionId]     = useState(null)
@@ -10,8 +8,9 @@ export default function useSimulation() {
   const [agents, setAgents]           = useState(initAgents())
   const [moderatorSummaries, setModerator] = useState([])
   const [maxRounds, setMaxRoundsState] = useState(5)
-  const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })  // ← add this line
   const [extremityLog, setExtremityLog] = useState({})
+  const [errorDetail, setErrorDetail] = useState(null)
+  const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })
   const esRef = useRef(null)
 
   function initAgents() {
@@ -68,9 +67,68 @@ export default function useSimulation() {
 
     if (event.type === "error") {
       setStatus("error")
+      setErrorDetail(event.error || "Unknown error occurred")
       esRef.current?.close()
     }
   }
+
+  // Add this effect — runs once on mount, checks for existing session
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const existingSession = params.get("session")
+    if (!existingSession) return
+
+    const reconnect = async () => {
+      try {
+        const snapshot = await getSnapshot(existingSession)
+        setSessionId(existingSession)
+
+        // Rebuild full state from every event that already happened
+        let rebuiltAgents = initAgents()
+        let rebuiltExtremity = {}
+        let rebuiltModerator = []
+
+        snapshot.events.forEach(event => {
+          if (event.type === "agent_statement") {
+            rebuiltAgents = {
+              ...rebuiltAgents,
+              [event.agent_id]: {
+                ...rebuiltAgents[event.agent_id],
+                extremity: event.extremity,
+                statementCount: (rebuiltAgents[event.agent_id]?.statementCount || 0) + 1
+              }
+            }
+            rebuiltExtremity = {
+              ...rebuiltExtremity,
+              [event.agent_id]: [...(rebuiltExtremity[event.agent_id] || []), event.extremity]
+            }
+          }
+          if (event.type === "moderator_summary") {
+            rebuiltModerator.push({ round: event.round, text: event.text })
+          }
+        })
+
+        setEvents(snapshot.events)
+        setAgents(rebuiltAgents)
+        setExtremityLog(rebuiltExtremity)
+        setModerator(rebuiltModerator)
+        setMaxRoundsState(snapshot.max_rounds)
+        setStatus(snapshot.status)
+
+        // If still running, attach to live stream for what's still coming
+        if (snapshot.status === "running") {
+          esRef.current = openStream(existingSession, handleEvent)
+        }
+      } catch (e) {
+        console.error("Failed to reconnect:", e)
+      }
+    }
+
+    reconnect()
+
+    return () => esRef.current?.close()
+  }, [])
+
 
   const start = async (topic, rounds) => {
     // Reset state
@@ -79,10 +137,12 @@ export default function useSimulation() {
     setAgents(initAgents())
     setModerator([])
     setMaxRoundsState(rounds)
+    setErrorDetail(null)
     setStatus("running")
 
     const { session_id } = await startSimulation(topic, rounds)
     setSessionId(session_id)
+    window.history.replaceState(null, "", `?session=${session_id}`)
 
     // Open SSE stream
     esRef.current = openStream(session_id, handleEvent)
@@ -90,6 +150,6 @@ export default function useSimulation() {
 
   return {
     sessionId, status, events, agents, extremityLog,
-    moderatorSummaries, maxRounds, researchProgress, start
+    moderatorSummaries, maxRounds, researchProgress, errorDetail, start
   }
 }

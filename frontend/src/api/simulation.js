@@ -42,3 +42,9 @@ export const getReport = async (timestamp) => {
   if (!res.ok) throw new Error("Report not found")
   return res.json()  // { content: "..." }
 }
+
+export const getSnapshot = async (sessionId) => {
+  const res = await fetch(`${BASE}/simulation/${sessionId}/snapshot`)
+  if (!res.ok) throw new Error("Snapshot not found")
+  return res.json()
+}

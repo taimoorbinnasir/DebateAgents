@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { listSimulations, getSavedSimulation, getReport } from "../api/simulation"
 import ExtremityChart from "../components/ExtremityChart"
 import FormattedText from "../components/FormattedText"
@@ -13,6 +13,8 @@ export default function HistoryPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportContent, setReportContent] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
+  const [searchParams] = useSearchParams()
+  const fromSession = searchParams.get("from")
 
   useEffect(() => {
     listSimulations().then(data => {
@@ -51,7 +53,10 @@ export default function HistoryPage() {
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-lg font-semibold text-gray-800">📚 Past Simulations</h1>
-          <Link to="/" className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+          <Link 
+            to={fromSession ? `/?session=${fromSession}` : "/"} 
+            className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+          >
             ← Back to Live
           </Link>
         </div>

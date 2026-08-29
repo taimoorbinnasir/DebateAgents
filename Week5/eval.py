@@ -1,5 +1,5 @@
 import sys, os, json
-from datetime import datetime
+from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from shared.agents import AGENT_PARAMS
 from shared.tools import llm
@@ -45,36 +45,47 @@ def conclude_simulation(topic: str, shared_history: list,
 
     print(f"\n{'='*60}\nGENERATING ANALYSIS REPORT...\n{'='*60}\n")
 
-    report = llm.invoke(f"""Analyze this debate transcript and write a structured report.
+    # "llm" imported from shared.tools not used because need
+    # larger max_tokens limit to create a final report
+    report_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    report_response = report_client.messages.create(
+    model="claude-haiku-4-5",
+    max_tokens=1200,   # hard ceiling as a safety net, not the primary control
+    messages=[{"role": "user", "content": f"""Analyze this debate transcript and write a structured report.
 
 Topic: {topic}
 Stop reason: {stop_reason}
 Extremity scores per agent per round (1=moderate, 10=extreme):
 {scores_text}
 
+STRICT LENGTH LIMIT: Write no more than 350 words total. Each section must be 
+2-3 sentences maximum. Be direct — state conclusions, not reasoning chains.
+Do not restate the extremity scores or transcript back to the reader.
+
 ## 1. Position Drift
-Did any agent shift their position? Who moved most, who was immovable?
+In 2-3 sentences: did any agent shift position? Who moved most, who was immovable?
 
 ## 2. Influence Map
-Which agent had the most impact on the conversation's direction?
+In 2-3 sentences: which agent had the most impact on the conversation's direction?
 
 ## 3. Radicalization
-Did any agent become more extreme over time? What triggered it?
+In 2-3 sentences: did any agent become more extreme? What triggered it?
 
 ## 4. Fault Lines
-What was the core unresolvable disagreement?
+In 2-3 sentences: what was the core unresolvable disagreement?
 
 ## 5. Verdict
-Who argued most effectively on evidence quality alone?
+In 1-2 sentences: who argued most effectively on evidence quality alone?
 
 Transcript:
-{transcript}""")
+{transcript}"""}]
+)
+    report_content = report_response.content[0].text
 
     # Save outputs
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     output_dir   = os.path.join(project_root, "Resources", "simulations")
     os.makedirs(output_dir, exist_ok=True)
-    timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     transcript_path = os.path.join(output_dir, f"transcript_{session_id}.json")
     report_path     = os.path.join(output_dir, f"report_{session_id}.md")
@@ -87,13 +98,12 @@ Transcript:
         }, f, indent=2)
 
     print_extremity_chart(extremity_log)            # Visualization
-    report_path = os.path.join(output_dir, f"report_{timestamp}.md")
     with open(report_path, "w") as f:
         f.write(f"# Debate Simulation Report\n")
         f.write(f"**Topic:** {topic}\n")
         f.write(f"**Stop reason:** {stop_reason}\n\n")
-        f.write(report.content)
+        f.write(report_content)
 
-    print(report.content)
+    print(report_content)
     print(f"\n📄 Transcript: {transcript_path}")
     print(f"📊 Report:     {report_path}")

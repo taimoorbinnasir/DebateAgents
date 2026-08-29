@@ -82,7 +82,6 @@ def get_events(session_id: str):
     return {"events": sim["events"]}
 
 
-
 @app.get("/simulations/{timestamp}/detail", response_model=SimulationTranscript)
 def get_saved_simulation(timestamp: str):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,3 +114,17 @@ def get_report(timestamp: str):
         content = f.read()
     
     return {"content": content}
+
+
+@app.get("/simulation/{session_id}/snapshot")
+def get_snapshot(session_id: str):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return {
+        "status": sim["status"],
+        "events": sim["events"],  # everything that's happened so far
+        "extremity_log": sim["extremity_log"],
+        "topic": sim["topic"],
+        "max_rounds": sim["max_rounds"]
+    }

@@ -1,5 +1,6 @@
 import { useState }   from "react"
 import { Link }       from "react-router-dom"
+import { getReport }  from "./api/simulation"
 import useSimulation  from "./hooks/useSimulation"
 import TopicForm      from "./components/TopicForm"
 import AgentCard      from "./components/AgentCard"
@@ -16,7 +17,7 @@ export default function App() {
 
   const {
     sessionId, status, events, agents, extremityLog,
-    moderatorSummaries, maxRounds, researchProgress, start
+    moderatorSummaries, maxRounds, researchProgress, errorDetail, start
   } = useSimulation()
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
@@ -66,7 +67,7 @@ export default function App() {
           </div>
 
           <Link
-            to="/history"
+            to={sessionId ? `/history?from=${sessionId}` : "/history"}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium"
           >
             📚 Past Simulations →
@@ -96,7 +97,7 @@ export default function App() {
               `🔍 Agents researching... (${researchProgress.completed}/${researchProgress.total})`}
             {status === "running"  && "⏳ Debate in progress..."}
             {status === "complete" && "✅ Debate complete"}
-            {status === "error"    && "❌ Simulation error"}
+            {status === "error"    && `❌ Simulation error: ${errorDetail || "unknown error"}`}
           </div>
         )}
 
