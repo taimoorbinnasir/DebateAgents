@@ -120,9 +120,6 @@ DebateAgents/
 
 ## To-do
 
-### Immediate
-- [ ] Finish remaining Day 7 integration checks — CORS verification not yet done
-
 ### Simulation behavior
 - [ ] **Team brainstorm + presenter selection** *(flagship extension — Week 9)* — each team privately brainstorms before speaking, evaluates its own arguments, and elects a presenter each round based on argumentative strength; presenter can rotate
 - [ ] Self-directed mid-debate retrieval — agents decide when they need more sources rather than relying solely on initial research
@@ -163,6 +160,7 @@ DebateAgents/
 - [x] Report/transcript filename consistency — `session_id` used everywhere, no more timestamp/UUID mismatch
 - [x] Report length control via explicit prompt constraints (word/sentence budgets) instead of relying on `max_tokens` truncation
 - [x] "Back to Live" navigation correctly restores an in-progress debate via URL-carried session ID
+- [x] Remaining Day 7 integration checks - CORS verification check done
 
 ## Status
 
