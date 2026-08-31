@@ -120,48 +120,65 @@ DebateAgents/
 
 ## To-do
 
-### Simulation behavior
-- [ ] **Team brainstorm + presenter selection** *(flagship extension — Week 9)* — each team privately brainstorms before speaking, evaluates its own arguments, and elects a presenter each round based on argumentative strength; presenter can rotate
-- [ ] Self-directed mid-debate retrieval — agents decide when they need more sources rather than relying solely on initial research
-- [ ] Selective agent participation — not every agent speaks every round
-- [ ] Agent-to-agent direct addressing — explicitly target a specific opponent by name
-- [ ] Dynamic agent count — configurable at runtime instead of hardcoded 3v3
-- [ ] Mid-debate topic injection — moderator introduces a new fact or event mid-simulation
-- [ ] Content hash-based document ingestion (instead of filename-based dedup)
-- [ ] Memory reset utility (programmatic, no manual folder deletion)
+### Immediate
+- [ ] Week 7 in progress: Days 1-3 done (position scoring, influence derivation, API wiring, plain language, source citation attachment); Days 4-6 remain
 
-### Analysis + metrics
-- [ ] Influence map — directed graph of who triggered whose escalation
-- [ ] Position drift tracker — spectrum movement per round, not just extremity
-- [ ] Comparative analysis across multiple runs of the same topic
+### Week 7 — Analysis tooling (remaining)
+- [ ] Day 4: Influence map visualization (directed graph, react-force-graph) + hover-to-cite source badges on debate statements
+- [ ] Day 5: Position drift chart (reuse ExtremityChart pattern, -10 to +10 scale) + user opinion input UI
+- [ ] Day 6: Comparative analysis across multiple runs of the same topic + PDF export
+
+### Simulation behavior
+- [ ] **Team brainstorm + presenter selection** *(flagship — Week 9)* — keep as a **separate debate mode** alongside individual mode, not a replacement; studies group consensus vs individual radicalization as distinct research questions
+- [ ] Self-directed mid-debate retrieval
+- [ ] Selective agent participation
+- [ ] Agent-to-agent direct addressing
+- [ ] Dynamic agent count
+- [ ] Mid-debate topic injection
+- [ ] Content hash-based document ingestion
+- [ ] Memory reset utility
+
+### Source citation integrity
+- [ ] **Source usage verification via cosine similarity** — compare agent reply embedding against retrieved source chunk embeddings, only attach citations above a similarity threshold (e.g. 0.35); zero extra API cost since it reuses the existing sentence-transformers embedder. More defensible than self-reported usage via system prompt. Note in write-up: similarity is a proxy for topical alignment, not proof the agent derived its argument from that specific source.
+
+### Model comparison
+- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — run on **shortened simulations (3-4 rounds)** to control cost before committing to a model switch
+
+### UX / Human-in-the-loop
+- [ ] User opinion input — capture the user's own stance after each round (or end of debate)
+- [ ] Hover-to-cite sources — badge on each statement showing sources, citation list on hover (data pipeline built Day 3; frontend UI is Day 4)
 
 ### Output
 - [ ] MiroFish-style structured prediction report
-- [ ] PDF export combining transcript + charts
-- [ ] Final research write-up documenting methodology and findings
+- [ ] Final research write-up — must include explicit methodology caveats on:
+  - Influence metric (engagement-correlated drift, not proven causation)
+  - Source citation (semantic similarity proxy, not confirmed derivation)
 
-### Infrastructure (post feature-complete)
-- [ ] Claude Code refactor pass on the codebase
-- [ ] Batch runner script — multiple simulations, different seeds, comparative output
-- [ ] GitHub Actions — automated nightly run on a fixed topic
-- [ ] Rate limiting (per IP/session) before any public deployment
-- [ ] Hard server-side cap on `max_rounds` regardless of frontend input
-- [ ] Anthropic Console spending limit set as a safety net
-- [ ] Consider auth gate / invite-only access instead of fully public
-- [ ] Deploy (Vercel for frontend, Railway/Render for backend) — **last step**, after everything above is complete
+### Infrastructure (post feature-complete, pre-deploy)
+- [ ] Claude Code refactor pass
+- [ ] Batch runner script
+- [ ] GitHub Actions nightly automation
+- [ ] Rate limiting (per user/session)
+- [ ] Hard server-side cap on max_rounds
+- [ ] Anthropic Console spending limit
+- [ ] Per-user history isolation (anonymous localStorage-based ID, no accounts — deferred until deploy is imminent)
+- [ ] Deploy (Vercel + Railway/Render) — **last step**
 
 ### Recently completed
 - [x] Full Week 6 build: FastAPI + SSE backend, React live feed, analysis dashboard, history browser
 - [x] Final report formatting — left-aligned, table rendering, consistent style with debate feed/moderator panel
-- [x] Session-based memory scoping — topic-scoped source collections (reused across runs), session-scoped agent memory (fresh per debate)
-- [x] Fictional-character reframing fix for agent personality refusals — agents now stay in character reliably
+- [x] Session-based memory scoping — topic-scoped source collections, session-scoped agent memory
+- [x] Fictional-character reframing fix for agent personality refusals
 - [x] Round-2 crash bug fixed
-- [x] Mid-run disconnect/reconnect via full-state snapshot endpoint (not just SSE replay)
-- [x] Report/transcript filename consistency — `session_id` used everywhere, no more timestamp/UUID mismatch
-- [x] Report length control via explicit prompt constraints (word/sentence budgets) instead of relying on `max_tokens` truncation
-- [x] "Back to Live" navigation correctly restores an in-progress debate via URL-carried session ID
-- [x] Remaining Day 7 integration checks - CORS verification check done
+- [x] Mid-run disconnect/reconnect via full-state snapshot endpoint
+- [x] Report/transcript filename consistency — session_id used everywhere
+- [x] Report length control via explicit prompt constraints
+- [x] "Back to Live" navigation correctly restores an in-progress debate
+- [x] Day 7 integration testing complete, including CORS verification
+- [x] Week 7 Day 1: batched position scoring per round (1 call instead of 6), influence edges derived algorithmically from position deltas (zero extra LLM cost)
+- [x] Week 7 Day 2: position_log, influence_edges, and user_opinions wired through status/snapshot/transcript endpoints; opinion submission endpoint added
+- [x] Week 7 Day 3: plain-language instruction added to agents, moderator, and final report prompts; source citations attached to each agent statement event
 
 ## Status
 
-Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end, with a working live-streaming web UI (React + FastAPI/SSE), extremity drift visualization, collapsible moderator panel, formatted final report viewer, and a history browser for past runs. Mid-run disconnects and page refreshes now recover full state correctly. Remaining work is CORS verification, then the Week 7-9 extensions above, then deployment last.
+Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end, with a working live-streaming web UI (React + FastAPI/SSE), extremity drift visualization, position logging, agent influence logging, collapsible moderator panel, formatted final report viewer, and a history browser for past runs. Mid-run disconnects and page refreshes now recover full state correctly. Remaining work is Week 7-9 extensions above, then deployment last.
