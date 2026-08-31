@@ -122,6 +122,7 @@ DebateAgents/
 
 ### Immediate
 - [ ] Week 7 in progress: Days 1-3 done (position scoring, influence derivation, API wiring, plain language, source citation attachment); Days 4-6 remain
+- [ ] Fix AGENT_PARAMS declaration in agents.py --> Move to config.py and resolve import issues
 
 ### Week 7 — Analysis tooling (remaining)
 - [ ] Day 4: Influence map visualization (directed graph, react-force-graph) + hover-to-cite source badges on debate statements
