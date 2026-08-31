@@ -15,6 +15,13 @@ NUM_ROUNDS = 10
 NUM_PRO_AGENTS = 3
 NUM_CON_AGENTS = 3
 
+LANGUAGE_INSTRUCTION = """
+Use plain, everyday language. Avoid jargon, academic phrasing, and complex sentence
+structure. Write so a general audience with no background in this topic can follow
+your argument easily. Short sentences. Simple words. Keep the same conviction and
+personality — just say it plainly.
+"""
+
 
 def topic_key(topic: str) -> str:
     return hashlib.md5(topic.lower().strip().encode()).hexdigest()[:8]

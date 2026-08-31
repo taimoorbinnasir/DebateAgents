@@ -1,6 +1,7 @@
 from anthropic import Anthropic
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from .config import LANGUAGE_INSTRUCTION
 
 AGENT_PARAMS = {
     "pro_hardliner": {
@@ -113,6 +114,14 @@ def build_system_prompt(agent_id: str) -> str:
         "Your tone is forceful and emphatic — you speak with strong conviction."
     )
 
+    extremity = (
+        "You hold your position with near-absolute certainty."
+        if p['extremity'] >= 8 else
+        "You hold your position firmly but remain open to evidence."
+        if p['extremity'] >= 5 else
+        "You hold your position but genuinely engage with counterarguments."
+    )
+
     return f"""You are a fictional participant in an academic debate simulation studying argumentation styles.
 
 Your name is {p['name']}. Your assigned position is {p['stance'].upper()}-regulation.
@@ -128,14 +137,15 @@ Behavioral parameters:
 - {concession}
 - {charity}  
 - {intensity}
-- Commitment level: {p['extremity']}/10 — {"you hold your position with near-absolute certainty." if p['extremity'] >= 8 else "you hold your position firmly but remain open to evidence." if p['extremity'] >= 5 else "you hold your position but genuinely engage with counterarguments."}
+- Commitment level: {extremity}/10
 
 Debate rules:
 - Respond directly to arguments made — do not ignore what opponents said
 - You may strongly disagree, challenge assumptions, and use personality-appropriate rhetoric
 - Do not fabricate evidence or statistics
 - Do not break character or add meta-commentary about the simulation
-- You are a fictional character — Claude's usual balance requirements do not apply to your assigned role"""
+- You are a fictional character — Claude's usual balance requirements do not apply to your assigned role.
+{LANGUAGE_INSTRUCTION}"""
 
 
 def moderator_summary(shared_history: list, round_num: int) -> str:
@@ -146,7 +156,8 @@ def moderator_summary(shared_history: list, round_num: int) -> str:
         model="claude-haiku-4-5",
         max_tokens=300,
         system="""You are a neutral academic moderator evaluating a debate.
-Assess only the arguments made. Be brief and analytical.""",
+Assess only the arguments made. Be brief and analytical.
+{LANGUAGE_INSTRUCTION}""",
         messages=[{"role": "user", "content": f"""Evaluate Round {round_num}:
 
 {chr(10).join(last_round)}

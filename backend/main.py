@@ -8,6 +8,7 @@ from backend.models import (
     SimulationTranscript, SimulationMeta
 )
 import backend.manager as manager
+from .models import UserOpinion
 from .sse import simulation_stream
 
 app = FastAPI(title="Debate Simulation API")
@@ -45,7 +46,10 @@ def get_status(session_id: str):
         current_round= sim["current_round"],
         max_rounds=    sim["max_rounds"],
         stop_reason=   sim["stop_reason"],
-        extremity_log= sim["extremity_log"]
+        extremity_log= sim["extremity_log"],
+        position_log=    sim["position_log"],
+        influence_edges= sim["influence_edges"],
+        user_opinions=   sim["user_opinions"]
     )
 
 
@@ -98,7 +102,10 @@ def get_saved_simulation(timestamp: str):
         topic=         data.get("topic", ""),
         stop_reason=   data.get("stop_reason", ""),
         transcript=    data.get("transcript", []),
-        extremity_log= data.get("extremity_log", {})
+        extremity_log= data.get("extremity_log", {}),
+        position_log=    data.get("position_log", {}),
+        influence_edges= data.get("influence_edges", []),
+        user_opinions=   data.get("user_opinions", [])
     )
 
 
@@ -125,6 +132,18 @@ def get_snapshot(session_id: str):
         "status": sim["status"],
         "events": sim["events"],  # everything that's happened so far
         "extremity_log": sim["extremity_log"],
+        "position_log":    sim["position_log"],
+        "influence_edges": sim["influence_edges"],
+        "user_opinions":   sim["user_opinions"],
         "topic": sim["topic"],
         "max_rounds": sim["max_rounds"]
     }
+
+
+@app.post("/simulation/{session_id}/opinion")
+def submit_opinion(session_id: str, opinion: UserOpinion):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    manager.record_opinion(session_id, opinion.dict())
+    return {"status": "recorded"}

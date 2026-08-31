@@ -8,8 +8,19 @@ from shared.memory import store_agent_statement, recall_agent_history
 from shared.ingest import ingest_agent_sources
 from shared.retrieve import retrieve_agent_sources
 
-from .helpers import get_last_ally_statement, get_last_opponent_statement, clean_history, should_stop
-from .eval import score_extremity, conclude_simulation
+from .helpers import (
+    get_last_ally_statement, 
+    get_last_opponent_statement, 
+    clean_history, 
+    should_stop, 
+    extract_agent_id_from_message
+)
+from .eval import (
+    score_extremity,
+    conclude_simulation,
+    score_positions_batch,
+    compute_influence_edges
+)
 
 
 # ===================== AGENT RESPONSE =====================
@@ -64,7 +75,13 @@ def agent_respond(agent_id: str, shared_history: list, round_num: int, session_i
     print()
 
     store_agent_statement(agent_id, reply, round_num, session_id)
-    return reply
+
+    # Return sources alongside the reply — this is the key change
+    cited_sources = [
+        {"title": s["source_title"], "url": s["source_url"]}
+        for s in sources
+    ]
+    return reply, cited_sources
 
 
 # ===================== MAIN SIMULATION LOOP =====================
@@ -127,11 +144,8 @@ def run_simulation(topic: str, max_rounds: int = 10):
 def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_queue=None):
     # If no queue provided, fall back to print behavior
     def push(event: dict):
-        if event_queue:
-            from backend.manager import push_event
-            push_event(session_id, event)
-        else:
-            print(event)  # fallback for terminal runs
+        from backend.manager import push_event
+        push_event(session_id, event) if event_queue else print(event)
 
     # Push research phase start
     push({"type": "research_start", "total_agents": len(AGENT_PARAMS)})
@@ -156,6 +170,9 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
         
         push({"type": "research_complete"})
 
+        structured_statements = []
+        position_log = {agent_id: [] for agent_id in AGENT_PARAMS}
+        targeting_log = []  # [{round, speaker, target}]
         for round_num in range(1, max_rounds + 1):
             push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})
             
@@ -163,15 +180,25 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
             random.shuffle(con_agents)
             turn_order = [x for pair in zip(pro_agents, con_agents) for x in pair]
 
+            round_statements = {}  # collect this round's statements for batch scoring
+
             for agent_id in turn_order:
-                reply = agent_respond(agent_id, shared_history, round_num, session_id)
+                # Find who this agent is about to address BEFORE generating the reply
+                last_opponent_msg = get_last_opponent_statement(agent_id, shared_history)
+                target_id = extract_agent_id_from_message(last_opponent_msg) if last_opponent_msg else None
+                
+                reply, cited_sources = agent_respond(agent_id, shared_history, round_num, session_id)
                 statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
                 shared_history.append(statement)
                 store_agent_statement(agent_id, reply, round_num, session_id)
+
                 score = score_extremity(agent_id, reply)
                 extremity_log[agent_id].append(score)
-
-                # Push agent statement event
+                round_statements[agent_id] = reply
+                
+                if target_id:
+                    targeting_log.append({"round": round_num, "speaker": agent_id, "target": target_id})
+                
                 push({
                     "type":       "agent_statement",
                     "agent_id":   agent_id,
@@ -179,9 +206,26 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
                     "stance":     AGENT_PARAMS[agent_id]["stance"],
                     "round_num":  round_num,
                     "text":       reply,
-                    "extremity":  score
+                    "extremity":  score,
+                    "sources":    cited_sources
                 })
 
+            # Batch score positions for this round — ONE call, not six
+            round_positions = score_positions_batch(round_statements, topic)
+            for agent_id in AGENT_PARAMS:
+                score = round_positions.get(agent_id, 0)
+                position_log[agent_id].append(score)
+
+            push({"type": "position_update", "round": round_num, "positions": round_positions})
+            structured_statements.append({
+                "agent_id":   agent_id,
+                "agent_name": AGENT_PARAMS[agent_id]["name"],
+                "stance":     AGENT_PARAMS[agent_id]["stance"],
+                "round_num":  round_num,
+                "text":       reply,
+                "sources":    cited_sources
+            })
+            
             # Moderator after each round
             mod_text = moderator_summary(shared_history, round_num)
             shared_history.append(f"MODERATOR: {mod_text}")
@@ -198,7 +242,9 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
         push({"type": "error", "error": str(e)})
     finally:
         # ALWAYS save whatever we have, even if interrupted
-        conclude_simulation(topic, shared_history, extremity_log, stop_reason, session_id)
+        influence_edges = compute_influence_edges(position_log, targeting_log)
+        conclude_simulation(topic, shared_history, extremity_log, stop_reason, 
+                            session_id, position_log, influence_edges, structured_statements)
         push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 

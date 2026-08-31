@@ -58,6 +58,9 @@ def start_simulation(session_id: str, topic: str, max_rounds: int):
         "max_rounds":    max_rounds,
         "stop_reason":   None,
         "extremity_log": {},
+        "position_log":    {},
+        "influence_edges": [],
+        "user_opinions":   [],
         "transcript":    [],
         "event_queue":   event_queue,
         "events":      []
@@ -84,17 +87,12 @@ def _run_simulation_thread(session_id: str, topic: str,
             event_queue=event_queue
         )
     except Exception as e:
-        # _simulations[session_id]["status"] = "error"
-        # _simulations[session_id]["stop_reason"] = str(e)
-        # event_queue.put({
-        #     "type":  "error",
-        #     "error": str(e)
-        # })
-        import traceback
-        traceback.print_exc()
         _simulations[session_id]["status"] = "error"
         _simulations[session_id]["stop_reason"] = str(e)
-        event_queue.put({"type": "error", "error": str(e)})
+        event_queue.put({
+            "type":  "error",
+            "error": str(e)
+        })
     finally:
         # Signal SSE stream to close
         event_queue.put({"type": "simulation_complete"})
@@ -115,6 +113,20 @@ def push_event(session_id: str, event: dict):
                 sim["extremity_log"][agent_id] = []
             sim["extremity_log"][agent_id].append(score)
             sim["transcript"].append(f"{event['agent_name']}: {event['text']}")
+
+        elif event["type"] == "position_update":
+            for agent_id, score in event["positions"].items():
+                if agent_id not in sim["position_log"]:
+                    sim["position_log"][agent_id] = []
+                sim["position_log"][agent_id].append(score)
+
+        elif event["type"] == "influence_edge":
+            sim["influence_edges"].append({
+                "from":   event["from"],
+                "to":     event["to"],
+                "round":  event["round"],
+                "weight": event["weight"]
+            })
         
         elif event["type"] == "round_start":
             sim["current_round"] = event["round"]
@@ -125,3 +137,9 @@ def push_event(session_id: str, event: dict):
         elif event["type"] == "simulation_complete":
             sim["status"]      = "complete"
             sim["stop_reason"] = event.get("stop_reason", "")
+
+
+def record_opinion(session_id: str, opinion: dict):
+    sim = _simulations.get(session_id)
+    if sim:
+        sim["user_opinions"].append(opinion)

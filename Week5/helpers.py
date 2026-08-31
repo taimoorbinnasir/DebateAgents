@@ -55,3 +55,14 @@ def clean_history(shared_history: list) -> list:
         msg for msg in shared_history
         if not any(phrase in msg.lower() for phrase in skip_phrases)
     ]
+
+
+# Given a message like 'Aggro: ...', find which agent_id spoke it
+def extract_agent_id_from_message(message: str) -> str | None:
+    if not message:
+        return None
+    speaker_name = message.split(":")[0].strip()
+    for agent_id, config in AGENT_PARAMS.items():
+        if config["name"] == speaker_name:
+            return agent_id
+    return None
