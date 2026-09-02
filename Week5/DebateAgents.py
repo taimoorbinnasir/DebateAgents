@@ -94,8 +94,6 @@ def run_simulation(topic: str, max_rounds: int = 10):
     pro_agents = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "pro"]
     con_agents = [a for a in AGENT_PARAMS if AGENT_PARAMS[a]["stance"] == "con"]
 
-    print(f"\n{'='*60}\nDEBATE: {topic}\nAgents: {', '.join([AGENT_PARAMS[a]['name'] for a in AGENT_PARAMS])}\n{'='*60}")
-
     # Web RAG — each agent searches once
     print("\n🔍 Agents searching for sources...")
     for agent_id in AGENT_PARAMS:
@@ -186,8 +184,6 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
                 # Find who this agent is about to address BEFORE generating the reply
                 last_opponent_msg = get_last_opponent_statement(agent_id, shared_history)
                 target_id = extract_agent_id_from_message(last_opponent_msg) if last_opponent_msg else None
-
-                print(f"DEBUG: {agent_id} → target: {target_id} (from msg: {last_opponent_msg[:50] if last_opponent_msg else None})")
 
                 reply, cited_sources = agent_respond(agent_id, shared_history, round_num, session_id)
                 statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
