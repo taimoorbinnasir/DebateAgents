@@ -186,7 +186,9 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
                 # Find who this agent is about to address BEFORE generating the reply
                 last_opponent_msg = get_last_opponent_statement(agent_id, shared_history)
                 target_id = extract_agent_id_from_message(last_opponent_msg) if last_opponent_msg else None
-                
+
+                print(f"DEBUG: {agent_id} → target: {target_id} (from msg: {last_opponent_msg[:50] if last_opponent_msg else None})")
+
                 reply, cited_sources = agent_respond(agent_id, shared_history, round_num, session_id)
                 statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
                 shared_history.append(statement)
@@ -243,6 +245,17 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, event_
     finally:
         # ALWAYS save whatever we have, even if interrupted
         influence_edges = compute_influence_edges(position_log, targeting_log)
+
+        # Push each edge as an event so manager.py's push_event picks it up
+        for edge in influence_edges:
+            push({
+                "type": "influence_edge",
+                "from": edge["from"],
+                "to": edge["to"],
+                "round": edge["round"],
+                "weight": edge["weight"]
+            })
+
         conclude_simulation(topic, shared_history, extremity_log, stop_reason, 
                             session_id, position_log, influence_edges, structured_statements)
         push({"type": "simulation_complete", "stop_reason": stop_reason})

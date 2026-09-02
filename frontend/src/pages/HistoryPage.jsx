@@ -2,8 +2,9 @@ import { useState, useEffect } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { listSimulations, getSavedSimulation, getReport } from "../api/simulation"
 import ExtremityChart from "../components/ExtremityChart"
-import FormattedText from "../components/FormattedText"
-import ReportModal from "../components/ReportModal"
+import FormattedText  from "../components/FormattedText"
+import ReportModal    from "../components/ReportModal"
+import SourceBadge    from "../components/SourceBadge"
 
 export default function HistoryPage() {
   const [simulations, setSimulations] = useState([])
@@ -14,6 +15,7 @@ export default function HistoryPage() {
   const [reportContent, setReportContent] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
   const [searchParams] = useSearchParams()
+  const [influenceEdges, setInfluenceEdges] = useState([])
   const fromSession = searchParams.get("from")
 
   useEffect(() => {
@@ -117,6 +119,17 @@ export default function HistoryPage() {
                 </div>
               </>
             )}
+
+            {detail?.statements?.map((stmt, i) => (
+              <div key={i} className="text-sm text-gray-700 border-b border-gray-50 pb-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-gray-600">{stmt.agent_name}</span>
+                  <span className="text-xs text-gray-400">Round {stmt.round_num}</span>
+                </div>
+                <FormattedText text={stmt.text} />
+                <SourceBadge sources={stmt.sources} />
+              </div>
+              ))}
           </div>
         </div>
       </div>

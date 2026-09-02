@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
-import RoundHeader from "./RoundHeader"
-import FormattedText from "./FormattedText"
+import RoundHeader    from "./RoundHeader"
+import FormattedText  from "./FormattedText"
+import SourceBadge    from "./SourceBadge"
 
 const STANCE_BUBBLE = {
   pro: "bg-green-50 border-green-200 text-green-900",
@@ -41,11 +42,12 @@ export default function DebateFeed({ events, maxRounds }) {
                   <span className="text-xs opacity-60">extremity {event.extremity}/10</span>
                 </div>
                 <FormattedText text={event.text} />
+                <SourceBadge sources={event.sources} />
               </div>
             </div>
           )
         }
-
+        
         return null
       })}
       <div ref={bottomRef} />

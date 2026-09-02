@@ -11,6 +11,7 @@ export default function useSimulation() {
   const [extremityLog, setExtremityLog] = useState({})
   const [errorDetail, setErrorDetail] = useState(null)
   const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })
+  const [influenceEdges, setInfluenceEdges] = useState([])
   const esRef = useRef(null)
 
   function initAgents() {
@@ -63,6 +64,12 @@ export default function useSimulation() {
     if (event.type === "simulation_complete") {
       setStatus("complete")
       esRef.current?.close()
+    }
+
+    if (event.type === "influence_edge") {
+      setInfluenceEdges(prev => [...prev, {
+        from: event.from, to: event.to, round: event.round, weight: event.weight
+      }])
     }
 
     if (event.type === "error") {
@@ -138,6 +145,7 @@ export default function useSimulation() {
     setModerator([])
     setMaxRoundsState(rounds)
     setErrorDetail(null)
+    setInfluenceEdges([])
     setStatus("running")
 
     const { session_id } = await startSimulation(topic, rounds)
@@ -149,7 +157,7 @@ export default function useSimulation() {
   }
 
   return {
-    sessionId, status, events, agents, extremityLog,
-    moderatorSummaries, maxRounds, researchProgress, errorDetail, start
+    sessionId, status, events, agents, extremityLog, moderatorSummaries,
+    maxRounds, researchProgress, errorDetail, influenceEdges, start
   }
 }

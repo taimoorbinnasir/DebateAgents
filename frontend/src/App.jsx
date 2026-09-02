@@ -8,6 +8,7 @@ import DebateFeed     from "./components/DebateFeed"
 import ModeratorPanel from "./components/ModeratorPanel"
 import ExtremityChart from "./components/ExtremityChart"
 import ReportModal    from "./components/ReportModal"
+import InfluenceMap   from "./components/InfluenceMap"
 
 export default function App() {
   const [view, setView] = useState("live")  // "live" | "analysis"
@@ -16,8 +17,8 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false)
 
   const {
-    sessionId, status, events, agents, extremityLog,
-    moderatorSummaries, maxRounds, researchProgress, errorDetail, start
+    sessionId, status, events, agents, extremityLog, moderatorSummaries,
+    maxRounds, researchProgress, errorDetail, influenceEdges, start
   } = useSimulation()
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
@@ -66,6 +67,18 @@ export default function App() {
             </button>
           </div>
 
+          <div className="flex items-center gap-3">
+            {status === "complete" && (
+              <button
+                onClick={openReport}
+                className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium
+                            hover:bg-purple-700 transition-colors"
+              >
+                📊 View Final Report
+              </button>
+            )}
+          </div>
+          
           <Link
             to={sessionId ? `/history?from=${sessionId}` : "/history"}
             className="text-xs text-blue-600 hover:text-blue-700 font-medium"
@@ -74,17 +87,6 @@ export default function App() {
           </Link>
         </div>
 
-        <div className="flex items-center gap-3">
-          {status === "complete" && (
-            <button
-              onClick={openReport}
-              className="text-xs bg-purple-600 text-white px-3 py-1.5 rounded font-medium
-                          hover:bg-purple-700 transition-colors"
-            >
-              📊 View Final Report
-            </button>
-          )}
-        </div>
 
         {/* Status bar */}
         {status !== "idle" && (
@@ -101,25 +103,21 @@ export default function App() {
           </div>
         )}
 
-        {/* Main content — toggles between live layout and analysis chart */}
+        {/* Main content — ONE ternary, toggles between live layout and analysis */}
         {view === "live" ? (
           <div className="flex gap-4 h-[75vh]">
 
             {/* PRO agents */}
             <div className="w-48 flex-shrink-0 overflow-y-auto">
-              <h2 className="text-xs font-semibold text-green-600 uppercase mb-2">
-                PRO
-              </h2>
+              <h2 className="text-xs font-semibold text-green-600 uppercase mb-2">PRO</h2>
               {proAgents.map(([id, agent]) => (
                 <AgentCard key={id} agent={agent} />
               ))}
             </div>
 
             {/* Debate feed */}
-            <div className="flex-1 bg-white rounded-lg border border-gray-200
-                            flex flex-col overflow-hidden">
-              <div className="px-4 py-2 border-b border-gray-100 text-xs
-                              text-gray-400 font-medium">
+            <div className="flex-1 bg-white rounded-lg border border-gray-200 flex flex-col overflow-hidden">
+              <div className="px-4 py-2 border-b border-gray-100 text-xs text-gray-400 font-medium">
                 DEBATE FEED
               </div>
               <DebateFeed events={events} maxRounds={maxRounds} />
@@ -127,9 +125,7 @@ export default function App() {
 
             {/* CON agents */}
             <div className="w-48 flex-shrink-0 overflow-y-auto">
-              <h2 className="text-xs font-semibold text-red-600 uppercase mb-2">
-                CON
-              </h2>
+              <h2 className="text-xs font-semibold text-red-600 uppercase mb-2">CON</h2>
               {conAgents.map(([id, agent]) => (
                 <AgentCard key={id} agent={agent} />
               ))}
@@ -140,6 +136,9 @@ export default function App() {
           <div className="bg-white rounded-lg border border-gray-200 p-4 h-[75vh] overflow-y-auto">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">Extremity Drift — Current Run</h2>
             <ExtremityChart extremityLog={extremityLog} />
+
+            <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Influence Map — Current Run</h2>
+            <InfluenceMap influenceEdges={influenceEdges} />
           </div>
         )}
 
