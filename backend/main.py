@@ -1,7 +1,7 @@
 import sys, os, uuid, json
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from fastapi import Request, FastAPI, HTTPException
+from fastapi import Request, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from backend.models import (
     SimulationRequest, SimulationStatus,
@@ -67,11 +67,6 @@ def get_transcript(session_id: str):
     )
 
 
-@app.get("/simulations", response_model=list[SimulationMeta])
-def list_simulations():
-    return manager.get_all_simulations()
-
-
 @app.get("/simulation/{session_id}/stream")
 async def stream_simulation(session_id: str, request: Request):
     return await simulation_stream(request, session_id, manager)
@@ -84,6 +79,39 @@ def get_events(session_id: str):
     if not sim:
         raise HTTPException(status_code=404, detail="Simulation not found")
     return {"events": sim["events"]}
+
+
+@app.get("/simulation/{session_id}/snapshot")
+def get_snapshot(session_id: str):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return {
+        "status": sim["status"],
+        "events": sim["events"],  # everything that's happened so far
+        "extremity_log": sim["extremity_log"],
+        "position_log":    sim["position_log"],
+        "influence_edges": sim["influence_edges"],
+        "user_opinions":   sim["user_opinions"],
+        "topic": sim["topic"],
+        "max_rounds": sim["max_rounds"]
+    }
+
+
+@app.post("/simulation/{session_id}/opinion")
+def submit_opinion(session_id: str, opinion: UserOpinion):
+    sim = manager.get_simulation(session_id)
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    manager.record_opinion(session_id, opinion.dict())
+    return {"status": "recorded"}
+
+
+
+
+@app.get("/simulations", response_model=list[SimulationMeta])
+def list_simulations():
+    return manager.get_all_simulations()
 
 
 @app.get("/simulations/{timestamp}/detail", response_model=SimulationTranscript)
@@ -123,27 +151,24 @@ def get_report(timestamp: str):
     return {"content": content}
 
 
-@app.get("/simulation/{session_id}/snapshot")
-def get_snapshot(session_id: str):
-    sim = manager.get_simulation(session_id)
-    if not sim:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    return {
-        "status": sim["status"],
-        "events": sim["events"],  # everything that's happened so far
-        "extremity_log": sim["extremity_log"],
-        "position_log":    sim["position_log"],
-        "influence_edges": sim["influence_edges"],
-        "user_opinions":   sim["user_opinions"],
-        "topic": sim["topic"],
-        "max_rounds": sim["max_rounds"]
-    }
-
-
-@app.post("/simulation/{session_id}/opinion")
-def submit_opinion(session_id: str, opinion: UserOpinion):
-    sim = manager.get_simulation(session_id)
-    if not sim:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    manager.record_opinion(session_id, opinion.dict())
-    return {"status": "recorded"}
+@app.get("/simulations/compare")
+def compare_simulations(session_ids: list[str] = Query(...)):
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sim_dir = os.path.join(project_root, "Resources", "simulations")
+    
+    results = []
+    for sid in session_ids:
+        filepath = os.path.join(sim_dir, f"transcript_{sid}.json")
+        if not os.path.exists(filepath):
+            continue
+        with open(filepath) as f:
+            data = json.load(f)
+        results.append({
+            "session_id":     sid,
+            "topic":          data.get("topic", ""),
+            "extremity_log":  data.get("extremity_log", {}),
+            "position_log":   data.get("position_log", {}),
+            "stop_reason":    data.get("stop_reason", "")
+        })
+    
+    return {"runs": results}

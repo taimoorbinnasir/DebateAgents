@@ -48,3 +48,10 @@ export const getSnapshot = async (sessionId) => {
   if (!res.ok) throw new Error("Snapshot not found")
   return res.json()
 }
+
+export const compareSimulations = async (sessionIds) => {
+  const params = sessionIds.map(id => `session_ids=${id}`).join("&")
+  const res = await fetch(`${BASE}/simulations/compare?${params}`)
+  if (!res.ok) throw new Error("Comparison failed")
+  return res.json()
+}
