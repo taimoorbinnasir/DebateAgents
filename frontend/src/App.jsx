@@ -9,6 +9,7 @@ import ModeratorPanel from "./components/ModeratorPanel"
 import ExtremityChart from "./components/ExtremityChart"
 import ReportModal    from "./components/ReportModal"
 import InfluenceMap   from "./components/InfluenceMap"
+import PositionChart from "./components/PositionChart"
 
 export default function App() {
   const [view, setView] = useState("live")  // "live" | "analysis"
@@ -18,7 +19,8 @@ export default function App() {
 
   const {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
-    maxRounds, researchProgress, errorDetail, influenceEdges, start
+    positionLog, userOpinions, setUserOpinions, maxRounds, researchProgress,
+    errorDetail, influenceEdges, start
   } = useSimulation()
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
@@ -139,9 +141,12 @@ export default function App() {
 
             <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Influence Map — Current Run</h2>
             <InfluenceMap influenceEdges={influenceEdges} />
+
+            <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Position Drift — Current Run</h2>
+            {console.log("positionLog:", positionLog)}
+            <PositionChart positionLog={positionLog} userOpinions={userOpinions} />
           </div>
         )}
-
       </div>
 
       {/* ModeratorPanel rendered at root level — fixed positioning works correctly */}

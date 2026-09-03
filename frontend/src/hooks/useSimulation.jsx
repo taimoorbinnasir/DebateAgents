@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react"
 import { startSimulation, openStream, getSnapshot } from "../api/simulation"
+import * as api from "../api/simulation"
 
 export default function useSimulation() {
   const [sessionId, setSessionId]     = useState(null)
@@ -12,6 +13,8 @@ export default function useSimulation() {
   const [errorDetail, setErrorDetail] = useState(null)
   const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })
   const [influenceEdges, setInfluenceEdges] = useState([])
+  const [positionLog, setPositionLog] = useState({})
+  const [userOpinions, setUserOpinions] = useState([])
   const esRef = useRef(null)
 
   function initAgents() {
@@ -70,6 +73,16 @@ export default function useSimulation() {
       setInfluenceEdges(prev => [...prev, {
         from: event.from, to: event.to, round: event.round, weight: event.weight
       }])
+    }
+
+    if (event.type === "position_update") {
+      setPositionLog(prev => {
+        const updated = { ...prev }
+        Object.entries(event.positions).forEach(([agentId, score]) => {
+          updated[agentId] = [...(updated[agentId] || []), score]
+        })
+        return updated
+      })
     }
 
     if (event.type === "error") {
@@ -146,6 +159,8 @@ export default function useSimulation() {
     setMaxRoundsState(rounds)
     setErrorDetail(null)
     setInfluenceEdges([])
+    setPositionLog({})
+    setUserOpinions([])
     setStatus("running")
 
     const { session_id } = await startSimulation(topic, rounds)
@@ -158,6 +173,7 @@ export default function useSimulation() {
 
   return {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
-    maxRounds, researchProgress, errorDetail, influenceEdges, start
+    positionLog, userOpinions, setUserOpinions, maxRounds, researchProgress,
+    errorDetail, influenceEdges, start
   }
 }
