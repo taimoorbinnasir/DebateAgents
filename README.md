@@ -121,13 +121,12 @@ DebateAgents/
 ## To-do
 
 ### Immediate
-- [ ] Week 7 in progress: Days 1-3 done (position scoring, influence derivation, API wiring, plain language, source citation attachment); Days 4-6 remain
-- [ ] Fix AGENT_PARAMS declaration in agents.py --> Move to config.py and resolve import issues
+- [ ] Fix `exportPDF` pagination — current output has redundant/overlapping content and inconsistent formatting between pages
+- [ ] Make the Influence Map independently downloadable as a static image (PNG/SVG), separate from the full PDF report, so it opens easily in built-in OS image viewers. Needs a more concrete node rendering — agent names should be legible directly on each node, not just via hover/click
 
 ### Week 7 — Analysis tooling (remaining)
-- [ ] Day 4: Influence map visualization (directed graph, react-force-graph) + hover-to-cite source badges on debate statements
-- [ ] Day 5: Position drift chart (reuse ExtremityChart pattern, -10 to +10 scale) + user opinion input UI
-- [ ] Day 6: Comparative analysis across multiple runs of the same topic + PDF export
+- [ ] Comparative analysis polish — currently averages extremity per run; consider adding position-based comparison too
+- [ ] Multi-target influence attribution (see below) — larger architectural change, not yet started
 
 ### Simulation behavior
 - [ ] **Team brainstorm + presenter selection** *(flagship — Week 9)* — keep as a **separate debate mode** alongside individual mode, not a replacement; studies group consensus vs individual radicalization as distinct research questions
@@ -138,16 +137,22 @@ DebateAgents/
 - [ ] Mid-debate topic injection
 - [ ] Content hash-based document ingestion
 - [ ] Memory reset utility
+- [ ] **Interactive user participation mode** — user becomes an actual debater with free-text input, agents respond to the user's specific arguments, continues until user types "quit" or similar. Requires injecting user messages into shared_history as a new speaker. (Note: simpler opinion-slider version was built and then reverted — this is a full replacement concept, not a resurrection of that feature.)
+
+### Influence tracking — multi-target attribution (Option B)
+- [ ] Phase 1: raw multi-edge capture — for each turn, compute similarity between the new statement and every prior statement in that round (not just the immediately preceding one), log an edge for every comparison with no filtering
+- [ ] Phase 2: threshold logic on top — determine an appropriate similarity cutoff informed by looking at the raw output first, not guessed upfront
+- Supersedes the current single-target model; note in write-up that this changes graph density and requires re-tuning the InfluenceMap visualization for higher edge counts
 
 ### Source citation integrity
-- [ ] **Source usage verification via cosine similarity** — compare agent reply embedding against retrieved source chunk embeddings, only attach citations above a similarity threshold (e.g. 0.35); zero extra API cost since it reuses the existing sentence-transformers embedder. More defensible than self-reported usage via system prompt. Note in write-up: similarity is a proxy for topical alignment, not proof the agent derived its argument from that specific source.
+- [ ] Source usage verification via cosine similarity — compare agent reply embedding against retrieved source chunk embeddings, only attach citations above a similarity threshold (e.g. 0.35); zero extra API cost. Note in write-up: similarity is a proxy for topical alignment, not proof the agent derived its argument from that specific source.
 
 ### Model comparison
-- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — run on **shortened simulations (3-4 rounds)** to control cost before committing to a model switch
+- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — run on shortened simulations (3-4 rounds) to control cost before committing to a model switch
 
 ### UX / Human-in-the-loop
-- [ ] User opinion input — capture the user's own stance after each round (or end of debate)
-- [ ] Hover-to-cite sources — badge on each statement showing sources, citation list on hover (data pipeline built Day 3; frontend UI is Day 4)
+- [ ] Hover-to-cite sources — badge on each statement showing sources, citation list on hover *(already built)*
+- [ ] Interactive user participation mode *(see Simulation behavior above)*
 
 ### Output
 - [ ] MiroFish-style structured prediction report
@@ -165,21 +170,6 @@ DebateAgents/
 - [ ] Per-user history isolation (anonymous localStorage-based ID, no accounts — deferred until deploy is imminent)
 - [ ] Deploy (Vercel + Railway/Render) — **last step**
 
-### Recently completed
-- [x] Full Week 6 build: FastAPI + SSE backend, React live feed, analysis dashboard, history browser
-- [x] Final report formatting — left-aligned, table rendering, consistent style with debate feed/moderator panel
-- [x] Session-based memory scoping — topic-scoped source collections, session-scoped agent memory
-- [x] Fictional-character reframing fix for agent personality refusals
-- [x] Round-2 crash bug fixed
-- [x] Mid-run disconnect/reconnect via full-state snapshot endpoint
-- [x] Report/transcript filename consistency — session_id used everywhere
-- [x] Report length control via explicit prompt constraints
-- [x] "Back to Live" navigation correctly restores an in-progress debate
-- [x] Day 7 integration testing complete, including CORS verification
-- [x] Week 7 Day 1: batched position scoring per round (1 call instead of 6), influence edges derived algorithmically from position deltas (zero extra LLM cost)
-- [x] Week 7 Day 2: position_log, influence_edges, and user_opinions wired through status/snapshot/transcript endpoints; opinion submission endpoint added
-- [x] Week 7 Day 3: plain-language instruction added to agents, moderator, and final report prompts; source citations attached to each agent statement event
-
 ## Status
 
-Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end, with a working live-streaming web UI (React + FastAPI/SSE), extremity drift visualization, position logging, agent influence logging, collapsible moderator panel, formatted final report viewer, and a history browser for past runs. Mid-run disconnects and page refreshes now recover full state correctly. Remaining work is Week 7-9 extensions above, then deployment last.
+Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end. The web UI (React + FastAPI/SSE) includes a live debate feed, agent extremity cards, collapsible moderator panel, an Analysis tab with extremity drift, position drift, and an interactive influence map, a history browser with multi-run comparison, and a final report viewer with consistent formatting. Mid-run disconnects and page refreshes recover full state via a snapshot endpoint. PDF export of the analysis bundle exists but currently has formatting bugs between pages, and the influence map is excluded from PDF export (screenshotting a canvas-based force graph proved unreliable) pending a standalone static-image export instead. Immediate priorities are fixing PDF export formatting and adding independent influence map image export, followed by the remaining Week 7 items, then Week 8-9.
