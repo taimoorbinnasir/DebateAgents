@@ -1,4 +1,5 @@
 import chromadb
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from shared.agents import AGENT_PARAMS
 
@@ -62,3 +63,33 @@ def recall_agent_history(agent_id: str, query: str, session_id: str, n: int = 3)
         include=["documents"]
     )
     return results["documents"][0] if results["documents"][0] else []
+
+
+
+
+def verify_source_usage(reply_text: str, sources: list[dict], threshold: float = 0.35) -> list[dict]:
+    """
+    Filters retrieved sources down to only those whose content is 
+    semantically close to what the agent actually said. 
+    Uses cosine similarity — zero extra LLM calls.
+    """
+    if not sources:
+        return []
+    
+    reply_embedding = embedder.encode(reply_text)
+    verified = []
+    
+    for source in sources:
+        source_embedding = embedder.encode(source["text"])
+        similarity = np.dot(reply_embedding, source_embedding) / (
+            np.linalg.norm(reply_embedding) * np.linalg.norm(source_embedding)
+        )
+
+        print(f"  Reply-to-source similarity: {similarity:.3f}")  # add this
+        if similarity >= threshold:
+            verified.append({
+                **source,
+                "similarity": round(float(similarity), 3)
+            })
+    
+    return verified

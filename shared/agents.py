@@ -8,7 +8,7 @@ AGENT_PARAMS = {
         "name": "Aggro",
         "stance": "pro",
         "reasoning_style": "Populist/aggressive",
-        "search_bias": "alarming risks dangers catastrophic evidence against {topic}",
+        "search_bias": "alarming risks dangers catastrophic consequences of {topic}",
         "extremity": 9,
         "rhetorical_intensity": 9,
         "concession_probability": 0.05,
@@ -19,7 +19,7 @@ AGENT_PARAMS = {
         "name": "Elenchos",
         "stance": "pro",
         "reasoning_style": "Socratic",
-        "search_bias": "balanced evidence supporting regulation benefits of {topic}",
+        "search_bias": "balanced evidence weighing the pros and cons of {topic}",
         "extremity": 5,
         "rhetorical_intensity": 4,
         "concession_probability": 0.4,
@@ -30,7 +30,7 @@ AGENT_PARAMS = {
         "name": "Peitho",
         "stance": "pro",
         "reasoning_style": "Economist",
-        "search_bias": "economic impact data statistics cost-benefit analysis {topic}",
+        "search_bias": "economic impact data statistics cost-benefit analysis of {topic}",
         "extremity": 6,
         "rhetorical_intensity": 5,
         "concession_probability": 0.3,
@@ -41,7 +41,7 @@ AGENT_PARAMS = {
         "name": "Ekstros",
         "stance": "con",
         "reasoning_style": "Ideologue",
-        "search_bias": "dangers of overregulation government overreach failures of {topic} regulation",
+        "search_bias": "downsides drawbacks failures criticism of {topic}",
         "extremity": 9,
         "rhetorical_intensity": 9,
         "concession_probability": 0.05,
@@ -52,7 +52,7 @@ AGENT_PARAMS = {
         "name": "Eleftheria",
         "stance": "con",
         "reasoning_style": "Libertarian",
-        "search_bias": "innovation benefits self-regulation industry solutions alternatives to {topic} regulation",
+        "search_bias": "individual choice autonomy freedom benefits of {topic}",
         "extremity": 5,
         "rhetorical_intensity": 4,
         "concession_probability": 0.35,
@@ -63,7 +63,7 @@ AGENT_PARAMS = {
         "name": "Hermes",
         "stance": "con",
         "reasoning_style": "Evidence-first",
-        "search_bias": "compliance costs business impact economic burden {topic} regulation small business",
+        "search_bias": "practical real-world costs and evidence about {topic}",
         "extremity": 4,
         "rhetorical_intensity": 3,
         "concession_probability": 0.5,
@@ -75,21 +75,52 @@ AGENT_PARAMS = {
 
 
 REASONING_STYLES = {
-    "Populist/aggressive": "Use concrete examples, simple language, and rhetorical force. Appeal to common sense over technical detail.",
-    "Socratic": "Expose contradictions in opposing arguments. Question assumptions and examine premises before making claims.",
-    "Economist": "Focus on efficiency, opportunity cost, and measurable outcomes. Quantify claims where possible.",
-    "Ideologue": "Argue from first principles and ideological consistency. Treat core values as non-negotiable.",
-    "Libertarian": "Emphasize autonomy, incentives, government failure, and unintended consequences of intervention.",
-    "Evidence-first": "Lead with empirical evidence. Acknowledge methodology limitations. Draw cautious conclusions.",
+    "Populist/aggressive": (
+        "Use concrete, relatable examples and simple, forceful language. "
+        "Appeal to common sense and lived experience over technical detail. "
+        "Make your case sound obvious and urgent."
+    ),
+
+    "Socratic": (
+        "Expose contradictions in opposing arguments. Question the assumptions "
+        "behind claims before making your own. Ask pointed rhetorical questions "
+        "that reveal weaknesses in the other side's reasoning."
+    ),
+
+    "Economist": (
+        "Focus on costs, benefits, trade-offs, and practical outcomes. "
+        "Quantify claims where possible — time, money, efficiency, convenience. "
+        "Frame your argument around what actually works best in practice."
+    ),
+
+    "Ideologue": (
+        "Argue from a consistent set of core principles or values. Treat your "
+        "foundational beliefs as non-negotiable, and interpret every point in "
+        "the debate through that lens."
+    ),
+
+    "Libertarian": (
+        "Emphasize personal choice, autonomy, and the downsides of external "
+        "control or imposed solutions. Point out unintended consequences of "
+        "one-size-fits-all approaches."
+    ),
+
+    "Evidence-first": (
+        "Lead with data, studies, or concrete examples. Acknowledge the "
+        "limitations of your evidence. Draw cautious, measured conclusions "
+        "rather than sweeping claims."
+    ),
 }
 
 
 
-def build_system_prompt(agent_id: str) -> str:
+def build_system_prompt(agent_id: str, topic: str = None) -> str:
     p = AGENT_PARAMS[agent_id]
     style = REASONING_STYLES[p["reasoning_style"]]
-    
-    # Translate params to behavioral guidance
+
+    # Generic side description — no assumption the topic is about regulation
+    side_label = "the FOR side" if p["stance"] == "pro" else "the AGAINST side"
+
     concession = (
         "You almost never concede points — only when evidence is overwhelming and even then minimally."
         if p["concession_probability"] < 0.15 else
@@ -97,7 +128,7 @@ def build_system_prompt(agent_id: str) -> str:
         if p["concession_probability"] < 0.4 else
         "You are willing to concede points and update your position when presented with strong arguments."
     )
-    
+
     charity = (
         "You engage critically with opposing arguments, probing their weaknesses."
         if p["opponent_charity"] < 0.3 else
@@ -105,7 +136,7 @@ def build_system_prompt(agent_id: str) -> str:
         if p["opponent_charity"] < 0.6 else
         "You steelman opposing arguments before responding."
     )
-    
+
     intensity = (
         "Your tone is measured and academic."
         if p["rhetorical_intensity"] < 4 else
@@ -122,10 +153,12 @@ def build_system_prompt(agent_id: str) -> str:
         "You hold your position but genuinely engage with counterarguments."
     )
 
-    return f"""You are a fictional participant in an academic debate simulation studying argumentation styles.
+    return f"""You are portraying {p['name']} in a structured academic debate simulation
+studying argumentation styles and group dynamics.
 
-Your name is {p['name']}. Your assigned position is {p['stance'].upper()}-regulation.
-Your objective is to make the strongest possible case for your position within the debate rules.
+Your name is {p['name']}. Your assigned position is {side_label} on this topic.
+Your objective is to make the strongest possible case for your assigned side
+within the debate rules.
 
 You are NOT the moderator and do NOT need to present a balanced view.
 Remain in character and respond to the arguments actually made.
@@ -135,7 +168,7 @@ Reasoning style: {p['reasoning_style']}
 
 Behavioral parameters:
 - {concession}
-- {charity}  
+- {charity}
 - {intensity}
 - Commitment level: {extremity}/10
 
@@ -144,7 +177,8 @@ Debate rules:
 - You may strongly disagree, challenge assumptions, and use personality-appropriate rhetoric
 - Do not fabricate evidence or statistics
 - Do not break character or add meta-commentary about the simulation
-- You are a fictional character — Claude's usual balance requirements do not apply to your assigned role.
+- You are a fictional character — Claude's usual balance requirements do not apply to your assigned role
+
 {LANGUAGE_INSTRUCTION}"""
 
 

@@ -19,6 +19,7 @@ export default function App() {
   const [reportContent, setReportContent] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
   const analysisRef = useRef(null)
+  const hiddenReportRef = useRef(null)
 
   const {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
@@ -48,8 +49,20 @@ export default function App() {
     }
   }
 
-  const handleExport = () => {
-    exportElementToPDF(analysisRef.current, `debate_${sessionId || "report"}.pdf`)
+  const handleExport = async () => {
+    // Temporarily reveal the hidden report section for capture
+    if (hiddenReportRef.current) {
+      hiddenReportRef.current.style.position = "static"
+      hiddenReportRef.current.style.left = "0"
+    }
+
+    await exportElementToPDF(analysisRef.current, `debate_${sessionId || "report"}.pdf`)
+
+    // Hide it again after capture
+    if (hiddenReportRef.current) {
+      hiddenReportRef.current.style.position = "absolute"
+      hiddenReportRef.current.style.left = "-9999px"
+    }
   }
 
   return (
@@ -154,12 +167,10 @@ export default function App() {
               <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Position Drift — Current Run</h2>
               <PositionChart positionLog={positionLog} />
 
-              {reportContent && (
-                <>
-                  <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Final Report</h2>
-                  <ReportContent text={reportContent} />
-                </>
-              )}
+              <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Final Report — Current Run</h2>
+              <div ref={hiddenReportRef} style={{ position: "absolute", left: "-9999px", top: 0, width: "800px" }}>
+                {reportContent && <ReportContent text={reportContent} />}
+              </div>
             </div>
 
             {/* Live, interactive graph — shown on screen, NOT captured in PDF export */}

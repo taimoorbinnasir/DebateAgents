@@ -24,6 +24,7 @@ export default function HistoryPage() {
   const [compareMode, setCompareMode] = useState(false)
   const [compareData, setCompareData] = useState(null)
   const detailRef = useRef(null)
+  const hiddenReportRef = useRef(null)
   const fromSession = searchParams.get("from")
 
   useEffect(() => {
@@ -83,8 +84,18 @@ export default function HistoryPage() {
     setCompareData(data)
   }
 
-  const handleExportHistory = () => {
-    exportElementToPDF(detailRef.current, `debate_${selected?.session_id}.pdf`)
+  const handleExportHistory = async () => {
+    if (hiddenReportRef.current) {
+      hiddenReportRef.current.style.position = "static"
+      hiddenReportRef.current.style.left = "0"
+    }
+
+    await exportElementToPDF(detailRef.current, `debate_${selected?.session_id}.pdf`)
+
+    if (hiddenReportRef.current) {
+      hiddenReportRef.current.style.position = "absolute"
+      hiddenReportRef.current.style.left = "-9999px"
+    }
   }
 
   return (
@@ -177,7 +188,7 @@ export default function HistoryPage() {
                     <button
                       onClick={handleExportHistory}
                       className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded font-medium
-                                 hover:bg-gray-700 transition-colors"
+                                hover:bg-gray-700 transition-colors"
                     >
                       ⬇ Export PDF
                     </button>
@@ -194,12 +205,14 @@ export default function HistoryPage() {
                   <h3 className="text-xs font-semibold text-gray-500 uppercase mt-6 mb-2">Position Drift</h3>
                   <PositionChart positionLog={detail.position_log} />
 
-                  {reportContent && (
-                    <>
-                      <h3 className="text-xs font-semibold text-gray-500 uppercase mt-6 mb-2">Final Report</h3>
-                      <ReportContent text={reportContent} />
-                    </>
-                  )}
+                  <div ref={hiddenReportRef} style={{ position: "absolute", left: "-9999px", top: 0, width: "100%" }}>
+                    {reportContent && (
+                      <>
+                        <h3 className="text-xs font-semibold text-gray-500 uppercase mt-6 mb-2">Final Report</h3>
+                        <ReportContent text={reportContent} />
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {/* Influence map — shown on screen only, NOT captured for PDF */}

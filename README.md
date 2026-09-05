@@ -120,13 +120,17 @@ DebateAgents/
 
 ## To-do
 
-### Immediate
-- [ ] Fix `exportPDF` pagination — current output has redundant/overlapping content and inconsistent formatting between pages
-- [ ] Make the Influence Map independently downloadable as a static image (PNG/SVG), separate from the full PDF report, so it opens easily in built-in OS image viewers. Needs a more concrete node rendering — agent names should be legible directly on each node, not just via hover/click
+### Known minor issues (not blocking)
+- [ ] PDF export: final line of content may be slightly clipped due to `html2canvas` pixel-based pagination limitations. Low priority — content remains legible. Real fix would require switching to a DOM-aware PDF library rather than screenshot-based export.
 
-### Week 7 — Analysis tooling (remaining)
-- [ ] Comparative analysis polish — currently averages extremity per run; consider adding position-based comparison too
-- [ ] Multi-target influence attribution (see below) — larger architectural change, not yet started
+### Larger, deferred features (next up)
+- [ ] **Multi-target influence attribution (Option B)**
+  - Phase 1: raw multi-edge capture — for each turn, compute similarity between the new statement and every prior statement in that round (not just the immediately preceding one), log an edge for every comparison with no filtering
+  - Phase 2: threshold logic on top — determine an appropriate similarity cutoff informed by looking at the raw output first, not guessed upfront
+  - Supersedes the current single-target model; note in write-up that this changes graph density and requires re-tuning the InfluenceMap visualization for higher edge counts
+
+### Model comparison
+- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — **moved to after Week 9**, run only once the system is feature-complete and stable, so results reflect the final architecture rather than an intermediate version. Run on shortened simulations (3-4 rounds) to control cost.
 
 ### Simulation behavior
 - [ ] **Team brainstorm + presenter selection** *(flagship — Week 9)* — keep as a **separate debate mode** alongside individual mode, not a replacement; studies group consensus vs individual radicalization as distinct research questions
@@ -137,28 +141,14 @@ DebateAgents/
 - [ ] Mid-debate topic injection
 - [ ] Content hash-based document ingestion
 - [ ] Memory reset utility
-- [ ] **Interactive user participation mode** — user becomes an actual debater with free-text input, agents respond to the user's specific arguments, continues until user types "quit" or similar. Requires injecting user messages into shared_history as a new speaker. (Note: simpler opinion-slider version was built and then reverted — this is a full replacement concept, not a resurrection of that feature.)
-
-### Influence tracking — multi-target attribution (Option B)
-- [ ] Phase 1: raw multi-edge capture — for each turn, compute similarity between the new statement and every prior statement in that round (not just the immediately preceding one), log an edge for every comparison with no filtering
-- [ ] Phase 2: threshold logic on top — determine an appropriate similarity cutoff informed by looking at the raw output first, not guessed upfront
-- Supersedes the current single-target model; note in write-up that this changes graph density and requires re-tuning the InfluenceMap visualization for higher edge counts
-
-### Source citation integrity
-- [ ] Source usage verification via cosine similarity — compare agent reply embedding against retrieved source chunk embeddings, only attach citations above a similarity threshold (e.g. 0.35); zero extra API cost. Note in write-up: similarity is a proxy for topical alignment, not proof the agent derived its argument from that specific source.
-
-### Model comparison
-- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — run on shortened simulations (3-4 rounds) to control cost before committing to a model switch
-
-### UX / Human-in-the-loop
-- [ ] Hover-to-cite sources — badge on each statement showing sources, citation list on hover *(already built)*
-- [ ] Interactive user participation mode *(see Simulation behavior above)*
+- [ ] **Interactive user participation mode** — user becomes an actual debater with free-text input, agents respond to the user's specific arguments, continues until user types "quit" or similar. Requires injecting user messages into shared_history as a new speaker.
 
 ### Output
 - [ ] MiroFish-style structured prediction report
 - [ ] Final research write-up — must include explicit methodology caveats on:
   - Influence metric (engagement-correlated drift, not proven causation)
   - Source citation (semantic similarity proxy, not confirmed derivation)
+  - Retrieval quality is topic-dependent — casual/low-coverage topics may yield weaker source grounding than well-documented policy topics (empirically observed during RAG debugging)
 
 ### Infrastructure (post feature-complete, pre-deploy)
 - [ ] Claude Code refactor pass
@@ -170,6 +160,19 @@ DebateAgents/
 - [ ] Per-user history isolation (anonymous localStorage-based ID, no accounts — deferred until deploy is imminent)
 - [ ] Deploy (Vercel + Railway/Render) — **last step**
 
+### Recently completed
+- [x] PDF export pagination fixed — content no longer duplicates across pages; whitespace-aware page-break detection added
+- [x] Influence map standalone PNG export — legible node labels drawn directly on canvas, white background fix for readability
+- [x] Comparative analysis — extremity AND position metrics now both available via toggle in ComparisonView
+- [x] **RAG quality debugging and fix** — diagnosed and resolved zero-retrieval bug:
+  - Strengthened `is_valid_chunk` to reject failed fetches, blocked/403/Cloudflare pages, and error boilerplate
+  - Calibrated distance threshold to `dist < 1.15` based on real measured data across two test topics
+  - Fixed round-1 empty-query fallback (now uses topic string instead of empty string when no prior message exists)
+  - Cleared and re-ingested stale/contaminated topic collections
+- [x] **Source citation verification via cosine similarity** — implemented and validated; produces varied, non-trivial verified/unverified splits across agents and turns, confirming the check discriminates correctly rather than passing or failing everything uniformly
+- [x] Generalized agent personas — removed hardcoded "regulation" framing from `build_system_prompt()` and reworded 3 of 6 reasoning styles (Economist, Ideologue, Libertarian) to work for arbitrary two-sided topics, not just policy/regulation debates
+- [x] Report section hidden from Analysis tab (both live view and History) while still included in PDF export — solved via temporarily-revealed off-screen DOM technique compatible with html2canvas
+
 ## Status
 
-Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end. The web UI (React + FastAPI/SSE) includes a live debate feed, agent extremity cards, collapsible moderator panel, an Analysis tab with extremity drift, position drift, and an interactive influence map, a history browser with multi-run comparison, and a final report viewer with consistent formatting. Mid-run disconnects and page refreshes recover full state via a snapshot endpoint. PDF export of the analysis bundle exists but currently has formatting bugs between pages, and the influence map is excluded from PDF export (screenshotting a canvas-based force graph proved unreliable) pending a standalone static-image export instead. Immediate priorities are fixing PDF export formatting and adding independent influence map image export, followed by the remaining Week 7 items, then Week 8-9.
+Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end and has been validated on multiple topics spanning policy debates (AI regulation) and casual two-sided topics (cars vs bikes, pineapple on pizza, tea vs coffee). The web UI includes a live debate feed, agent extremity cards, collapsible moderator panel, an Analysis tab with extremity drift, position drift, and an interactive influence map, a history browser with multi-run comparison across both extremity and position metrics, and a final report viewer cleanly separated from the Analysis tab display while still bundled into PDF exports. RAG retrieval quality has been debugged and calibrated with a real, data-driven distance threshold, and source citations are now verified via cosine similarity rather than shown purely on retrieval availability. Agent personas are now topic-agnostic, no longer assuming a regulation/policy framing. Immediate next step is multi-target influence attribution, followed by Week 8 automation and Week 9's flagship team-debate extension; model comparison across Claude tiers is deliberately deferred until after Week 9 so results reflect the final, stable system.

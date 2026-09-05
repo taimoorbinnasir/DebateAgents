@@ -4,7 +4,7 @@ from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.agents import AGENT_PARAMS, build_system_prompt, moderator_summary
-from shared.memory import store_agent_statement, recall_agent_history
+from shared.memory import store_agent_statement, recall_agent_history, verify_source_usage
 from shared.ingest import ingest_agent_sources
 from shared.retrieve import retrieve_agent_sources
 
@@ -29,7 +29,7 @@ def agent_respond(agent_id: str, shared_history: list, round_num: int, session_i
     agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[agent_id]
 
-    last_message = shared_history[-1] if len(shared_history) > 1 else ""
+    last_message = shared_history[-1] if len(shared_history) > 1 else topic
     past    = recall_agent_history(agent_id, last_message, session_id, n=2)
     sources = retrieve_agent_sources(agent_id, last_message, topic, n=2)
     last_opponent = get_last_opponent_statement(agent_id, shared_history)
@@ -76,10 +76,13 @@ def agent_respond(agent_id: str, shared_history: list, round_num: int, session_i
 
     store_agent_statement(agent_id, reply, round_num, session_id)
 
+    verified_sources = verify_source_usage(reply, sources)
+    print(f"DEBUG {agent_id}: {len(sources)} retrieved, {len(verified_sources)} verified")
+
     # Return sources alongside the reply — this is the key change
     cited_sources = [
-        {"title": s["source_title"], "url": s["source_url"]}
-        for s in sources
+        {"title": s["source_title"], "url": s["source_url"], "similarity": s["similarity"]}
+        for s in verified_sources    # ← fixed: iterate over verified_sources
     ]
     return reply, cited_sources
 

@@ -37,10 +37,12 @@ def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) ->
     agent_name = AGENT_PARAMS[agent_id]["name"]
     collection_name = f"agent_{agent_name}_sources_{topic_key(topic)}"
     col = chroma.get_or_create_collection(collection_name)
-    
+
+    print(f"DEBUG retrieve_agent_sources[{agent_id}]: collection={collection_name!r} count={col.count()} query={query!r}")  # add this
+
     if col.count() == 0:
         return []
-    
+
     embedding = embedder.encode(query).tolist()
     results = col.query(
         query_embeddings=[embedding],
@@ -50,7 +52,10 @@ def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) ->
 
     if not results["documents"][0]:
         return []
-    
+
+    for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+        print(f"  DEBUG dist={dist:.4f} [{meta['source_title']}] {doc[:80]!r}")  # add this
+
     return [
         {
             "text": doc,
@@ -64,5 +69,5 @@ def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) ->
             results["metadatas"][0],
             results["distances"][0]
         )
-        # if dist < 0.8
+        if dist < 1.2
     ]

@@ -22,13 +22,17 @@ def search_web(query: str, n_results: int = 5) -> list[dict]:
         "num": n_results
     })
     data = response.json()
+    results = data.get("organic_results", [])[:n_results]
+    # Skip YouTube — video pages don't yield useful text content
+    results = [r for r in results if "youtube.com" not in r.get("link", "")]
+
     return [
         {
             "title": r.get("title", ""),
             "snippet": r.get("snippet", ""),
             "link": r.get("link", "")
         }
-        for r in data.get("organic_results", [])[:n_results]
+        for r in results
     ]
 
 
@@ -36,6 +40,13 @@ def search_web(query: str, n_results: int = 5) -> list[dict]:
 def fetch_url_content(url: str, max_chars: int = 5000) -> str:
     try:
         response = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+
+        # Skip non-HTML content (PDFs, images, etc.) — decoding them as text
+        # produces binary garbage that still passes is_valid_chunk()'s checks
+        content_type = response.headers.get("Content-Type", "")
+        if "html" not in content_type and "text" not in content_type:
+            return ""
+
         text = response.text
         
         # Remove script and style blocks entirely (catches JSON-LD)

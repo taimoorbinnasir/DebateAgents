@@ -13,6 +13,17 @@ def is_valid_chunk(chunk: str) -> bool:
     digits = sum(c.isdigit() for c in stripped)
     if digits / len(stripped) > 0.3:
         return False
+    
+    error_signals = [
+        "blocked", "access denied", "403", "404", "forbidden",
+        "verify you are a human", "enable cookies", "cloudflare",
+        "attention required", "network policy", "please login",
+        "there was a problem providing", "request could not be satisfied"
+    ]
+    lower = stripped.lower()
+    if any(sig in lower for sig in error_signals):
+        return False
+    
     return True
 
 
