@@ -14,6 +14,7 @@ const STANCE_COLOR = { pro: "#22c55e", con: "#ef4444" }
 
 export default function InfluenceMap({ influenceEdges }) {
   const [selectedNode, setSelectedNode] = useState(null)
+  const [roundFilter, setRoundFilter] = useState("all")
   const graphRef = useRef()
   const containerRef = useRef() 
 
@@ -25,8 +26,31 @@ export default function InfluenceMap({ influenceEdges }) {
     )
   }
 
+  // Available rounds, derived from the data itself
+  const availableRounds = [...new Set(influenceEdges.map(e => e.round))].sort((a, b) => a - b)
+
+  // Filter edges based on selection
+  const filteredEdges = roundFilter === "all"
+    ? influenceEdges
+    : influenceEdges.filter(e => e.round === roundFilter)
+
+  if (filteredEdges.length === 0) {
+    return (
+      <div>
+        <RoundFilterBar
+          availableRounds={availableRounds}
+          roundFilter={roundFilter}
+          setRoundFilter={setRoundFilter}
+        />
+        <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
+          No influence detected in round {roundFilter}
+        </div>
+      </div>
+    )
+  }
+
   const agentIds = new Set()
-  influenceEdges.forEach(e => { agentIds.add(e.from); agentIds.add(e.to) })
+  filteredEdges.forEach(e => { agentIds.add(e.from); agentIds.add(e.to) })
 
   const nodes = Array.from(agentIds).map(id => ({
     id,
@@ -34,7 +58,7 @@ export default function InfluenceMap({ influenceEdges }) {
     stance: AGENT_META[id]?.stance || "pro"
   }))
 
-  const links = influenceEdges.map(e => ({
+  const links = filteredEdges.map(e => ({
     source: e.from,
     target: e.to,
     weight: e.weight,
@@ -55,11 +79,11 @@ export default function InfluenceMap({ influenceEdges }) {
     return link.source === selectedNode || link.target === selectedNode ||
            link.source.id === selectedNode || link.target.id === selectedNode
   }
-
+  
   const exportAsImage = () => {
     const canvasElement = containerRef.current?.querySelector("canvas")
     if (!canvasElement) return
-
+    
     // Create a new canvas with a white background, then draw the graph on top
     const exportCanvas = document.createElement("canvas")
     exportCanvas.width = canvasElement.width
@@ -71,13 +95,21 @@ export default function InfluenceMap({ influenceEdges }) {
     ctx.drawImage(canvasElement, 0, 0)
 
     const link = document.createElement("a")
-    link.download = "influence_map.png"
+
+    const roundLabel = roundFilter === "all" ? "all_rounds" : `round_${roundFilter}`
+    link.download = `influence_map_${roundLabel}.png`
     link.href = exportCanvas.toDataURL("image/png")
     link.click()
   }
 
   return (
     <div>
+      <RoundFilterBar
+        availableRounds={availableRounds}
+        roundFilter={roundFilter}
+        setRoundFilter={setRoundFilter}
+      />
+
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-gray-400">
           Click a node to isolate its connections. Edge weight = position shift (proxy for influence, not proven causation).
@@ -112,12 +144,10 @@ export default function InfluenceMap({ influenceEdges }) {
             const fontSize = 12 / globalScale
             ctx.font = `${fontSize}px sans-serif`
             const radius = 6
-
             ctx.beginPath()
             ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI)
             ctx.fillStyle = isConnected(node.id) ? STANCE_COLOR[node.stance] : "#d1d5db"
             ctx.fill()
-
             ctx.textAlign = "center"
             ctx.textBaseline = "top"
             ctx.fillStyle = "#1f2937"
@@ -131,6 +161,32 @@ export default function InfluenceMap({ influenceEdges }) {
           }}
         />
       </div>
+    </div>
+  )
+}
+
+
+function RoundFilterBar({ availableRounds, roundFilter, setRoundFilter }) {
+  return (
+    <div className="flex items-center gap-1 mb-3 flex-wrap">
+      <span className="text-xs text-gray-400 mr-1">Show:</span>
+      <button
+        onClick={() => setRoundFilter("all")}
+        className={`text-xs px-2.5 py-1 rounded font-medium transition-colors
+          ${roundFilter === "all" ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+      >
+        All rounds
+      </button>
+      {availableRounds.map(r => (
+        <button
+          key={r}
+          onClick={() => setRoundFilter(r)}
+          className={`text-xs px-2.5 py-1 rounded font-medium transition-colors
+            ${roundFilter === r ? "bg-purple-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+        >
+          Round {r}
+        </button>
+      ))}
     </div>
   )
 }
