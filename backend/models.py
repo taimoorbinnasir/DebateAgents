@@ -11,6 +11,7 @@ class UserOpinion(BaseModel):
 class SimulationRequest(BaseModel):
     topic: str
     max_rounds: int = 5
+    mode: str = "individual"
 
 
 # ── Per-message ────────────────────────────────────

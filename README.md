@@ -120,59 +120,80 @@ DebateAgents/
 
 ## To-do
 
-### Week 8 — Flagship extensions
-- [ ] **Team brainstorm + presenter selection** *(the big one)* — teams privately brainstorm before speaking, evaluate their own arguments, elect a presenter each round based on argumentative strength; presenter can rotate. Kept as a **separate debate mode** alongside individual mode, not a replacement — studies group consensus vs individual radicalization as distinct research questions.
-- [ ] Dynamic agent count — configurable at runtime instead of hardcoded 3v3
-- [ ] Mid-debate topic injection — moderator introduces a new fact or event mid-simulation
-- [ ] Interactive user participation mode — user becomes an actual debater with free-text input, agents respond to the user's specific arguments, continues until user types "quit" or similar
+**Week 8 — Flagship extensions**
 
-### Model comparison
-- [ ] Compare Haiku vs Sonnet vs Opus on debate quality — run only once the system is feature-complete and stable (after Week 8's flagship extensions), so results reflect the final architecture. Run on shortened simulations (3-4 rounds) to control cost.
-- [ ] Analyze outputs and determine which model fits which task best (e.g. agent responses vs moderator summaries vs final report generation may not all need the same model tier)
+**Status:** Team Mode backend scaffolding integrated (Parts 1-4 of the original breakdown), but NOT actually running as team mode yet — currently a mislabeled copy of Individual Mode. Real team-mode behavior (brainstorm → presenter selection → single team statement) still needs to be verified/fixed end-to-end. Treat the sub-tasks below as the real remaining work before Team Mode is genuinely done.
 
-### Hosted vector DB migration (pre-deploy requirement)
-- [ ] Migrate ChromaDB from local `PersistentClient` to a hosted solution (Chroma Cloud, Pinecone, or similar) before deploying — Render/Railway's ephemeral disk wipes local storage on every redeploy or restart, so local persistence won't survive in production
-- [ ] Update `shared/memory.py`'s client initialization accordingly; verify agent memory and source collections both migrate correctly
-- [ ] Test that topic-scoped source collections still correctly skip re-ingestion after migration (verify the "already ingested" check still works against the hosted DB)
+- Fix Team Mode's backend loop to actually behave like team mode, not individual mode. Currently run_team_round_loop is producing one statement per agent (6 total) exactly like run_individual_round_loop, rather than one statement per TEAM (2 total) via brainstorm+selection. Verify team_brainstorm() and select_presenter() are actually being called and their output is what gets appended to shared_history — not each agent responding individually and unprompted the way Individual Mode does.
+- Fix live frontend updates for Team Mode. Agents/teams are arguing correctly on the backend but the frontend (`TeamMode.jsx`, DebateFeed) isn't rendering the SSE events in real time. Check: is the SSE stream actually connected for team-mode sessions (openStream called correctly in `useSimulation({ mode: "team" })`), are agent_statement events actually being pushed with agent_id: "pro"/"con" as expected, and is DebateFeed receiving/rendering them.
+- Rework evaluation metrics for 2-team comparison instead of 6-agent comparison. Extremity chart, position chart, and influence map currently still operate on a 6-way individual-agent basis even for team-mode runs. Decide which metrics remain meaningful with only 2 comparison units:
+  - **Extremity chart:** keep, but should show exactly 2 lines ("PRO Team", "CON Team"), not 6
+  - **Position chart:** keep, same 2-line treatment
+  - **Influence map:** likely not meaningful with only 2 nodes — a 2-node graph reduces to a single bidirectional edge, which isn't worth visualizing as a "map." Consider removing InfluenceMap entirely from Team Mode's Analysis view, or replacing it with a simpler "who influenced whom, and by how much, per round" text/table summary instead
+- Fix final report generation for Team Mode. `conclude_simulation` is currently generating the report using Individual Mode's framing (referencing 6 named agents, extremity per individual, etc.) even for team-mode runs. Needs a team-aware report prompt — analyzing 2 teams' position drift and presenter patterns, not 6 agents' individual behavior. **Consider: should the report also comment on presenter selection (which agent got picked to speak each round, and whether that rotated or stayed fixed)?**
+- Fix transcript saving for Team Mode. Saved transcript JSON is currently being written in Individual Mode's shape/format regardless of which mode actually ran. Needs to correctly reflect team-mode's actual data: 2-key extremity/position logs, presenter_log, team-level statements — not silently reuse the individual-mode schema.
+- Add a mode field to every saved transcript/report, so past runs are correctly tagged as "individual" or "team" at save time (_currently no such field exists, so past runs can't be distinguished after the fact_).
+- Update History page to toggle/filter between Individual and Team runs. `HistoryPage.jsx` currently shows all past simulations mixed together with no way to distinguish mode. Add either a toggle (Individual / Team / All) or a badge per list item, using the new mode field from the transcript JSON. Also update `HistoryPage.jsx`'s detail view to correctly render team-mode's data shape (2-line charts, no influence map or a team-appropriate replacement, team-aware report) — same fixes as above, but for viewing past runs, not just live ones.
+- See the evaluation criterion for Presenter Selection. Currently, the backend is running the same way as Individual Mode, but only one of the agents with the best dist score is kept (_so it's essentially best-from-3 vs best-from-3 rather than an actual mutli-agent brainstorm_).
 
-### Week 9 — Automation (with mandatory safety guardrails)
-- [ ] Claude Code refactor pass on the codebase — done here, after the flagship architecture is finalized, so refactoring isn't wasted on code that's about to change
-- [ ] Batch runner script — multiple simulations, different seeds, comparative output. **Must always require explicit confirmation before running** (prints estimated cost upfront, waits for typed "yes"). Never runs unbounded or unattended.
-- [ ] GitHub Actions automation — **manual `workflow_dispatch` trigger ONLY, requiring a typed confirmation string.** NOT a blind `schedule:` cron job. If genuine unattended scheduling is ever added later, it must include a hard daily run-count cap checked before any API call fires, so a bug can't silently trigger unlimited runs overnight.
-- [ ] **Anthropic Console spending limit must be set BEFORE any automation work begins** — the real backstop against runaway cost regardless of code-level bugs. Non-negotiable prerequisite, not a nice-to-have.
+<hr>
 
-### Future research — not scheduled, dedicated deep-dive later
-- [ ] **Design a principled algorithm for measuring inter-agent influence** in multi-agent debate. Investigated three approaches during Week 7 (raw embedding similarity for multi-target attribution, softmax-normalized relative attribution, LLM-judged influence estimation) — all either reproduce the same unresolved absolute-threshold problem or add no information beyond existing position-drift data. Requires original methodological work, not a quick fix. Current `InfluenceMap` ships with the simpler, defensible "engagement-correlated position drift" model in the meantime (single-target-per-turn, accumulated across rounds, round-scoped) — relabeled in UI and write-up as "engagement-correlated influence," not "influence," to avoid overclaiming causation. Key finding: reply-to-reply and reply-to-source cosine similarity consistently produces smooth, uninformative distributions with no natural threshold across every attempt this project has made (RAG retrieval, source citation verification, and influence attribution all hit this same wall) — worth treating as a standing methodological limitation of sentence-embedding similarity for this class of problem.
-- [ ] Once a better influence algorithm is designed, alter the automation pipeline (batch runner, GitHub Actions) to incorporate it into future runs
+**Model comparison**
 
-### Pre-deploy hardening → Deploy
-- [ ] Rate limiting (per user/session)
-- [ ] Hard server-side cap on max_rounds regardless of frontend input
-- [ ] Per-user history isolation (anonymous localStorage-based ID, no accounts)
-- [ ] Deploy — Vercel (frontend) + Render/Railway (backend), or equivalent alternatives
+- Compare Haiku vs Sonnet vs Opus on debate quality — run only once the system is feature-complete and stable (after Week 8's flagship extensions are genuinely finished, per the sub-tasks above). Run on shortened simulations (3-4 rounds) to control cost.
+- Analyze outputs and determine which model fits which task best
 
-### Final research write-up
-- [ ] Methodology, findings, and all the honest caveats built up throughout the project, including:
-  - Every problem faced and how it was addressed (RAG retrieval debugging, source citation verification, the influence-algorithm investigation and its deliberate deferral)
-  - What was built vs what was deliberately left as future work, and why
-  - Influence metric caveat: engagement-correlated drift, not proven causation
-  - Source citation caveat: semantic similarity proxy, not confirmed derivation
-  - Retrieval quality is topic-dependent — casual/low-coverage topics may yield weaker source grounding than well-documented policy topics
-  - Standing limitation: sentence-embedding cosine similarity produced smooth, non-bimodal distributions across every application tried in this project — genuinely informative thresholds could not be derived from the data itself in any of these cases
+<hr>
 
-### Recently completed
-- [x] Round-scoped influence map — can view influence per individual round or cumulative across the whole debate
-- [x] PDF export pagination fixed — content no longer duplicates across pages; whitespace-aware page-break detection added
-- [x] Influence map standalone PNG export — legible node labels drawn directly on canvas, white background fix for readability, filename reflects active round filter
-- [x] Comparative analysis — extremity AND position metrics now both available via toggle in ComparisonView
-- [x] **RAG quality debugging and fix** — diagnosed and resolved zero-retrieval bug: strengthened content filtering, calibrated distance threshold from real measured data, fixed round-1 empty-query fallback, cleared and re-ingested stale collections
-- [x] **Source citation verification via cosine similarity** — implemented and validated; produces varied, non-trivial verified/unverified splits across agents and turns
-- [x] **Generalized agent personas** — removed hardcoded "regulation" framing, reworded 3 of 6 reasoning styles to work for arbitrary two-sided topics
-- [x] Report section hidden from Analysis tab (both live view and History) while still included in PDF export
-- [x] **Multi-target influence attribution — investigated and deliberately deferred** (see Future Research section) — explored three methods, found all either redundant with existing position-drift data or blocked by an unresolvable absolute-threshold problem inherent to sentence-embedding similarity on this task
+**Hosted vector DB migration (pre-deploy requirement)**
+- Migrate ChromaDB from local PersistentClient to a hosted solution (Chroma Cloud, Pinecone, or similar) before deploying
+- Update shared/memory.py's client initialization accordingly; verify agent memory, source collections, AND team channel collections (new in Week 8) all migrate correctly
+- Test that topic-scoped source collections still correctly skip re-ingestion after migration
+
+<hr>
+
+**Week 9 — Automation (with mandatory safety guardrails)**
+- Claude Code refactor pass on the codebase
+- Batch runner script — must always require explicit confirmation before running, prints estimated cost upfront
+- GitHub Actions automation — manual workflow_dispatch trigger ONLY, requires typed confirmation string, NOT a blind cron schedule
+- Anthropic Console spending limit must be set BEFORE any automation work begins
+- Future research — not scheduled, dedicated deep-dive later
+- Design a principled algorithm for measuring inter-agent influence in multi-agent debate. Investigated three approaches during Week 7 (raw embedding similarity, softmax-normalized attribution, LLM-judged influence) — all either reproduce the same unresolved threshold problem or add no information beyond position-drift data. Current InfluenceMap ships with the simpler "engagement-correlated position drift" model for Individual Mode. Note: Team Mode's 2-node structure may make this entire line of investigation moot for that mode specifically — worth revisiting once Team Mode's own metrics are decided.
+- Once a better influence algorithm is designed, alter the automation pipeline to incorporate it
+
+<hr>
+
+**Pre-deploy hardening → Deploy**
+- Rate limiting (per user/session)
+- Hard server-side cap on max_rounds
+- Per-user history isolation (anonymous localStorage-based ID, no accounts)
+- Deploy — Vercel + Render/Railway
+
+<hr>
+
+**Final research write-up**
+- Methodology, findings, and all honest caveats, including:
+  - Every problem faced and how it was addressed
+  - Individual Mode vs Team Mode as two distinct research questions (personality-driven radicalization vs group consensus/presenter dynamics)
+  - Influence metric caveat (engagement-correlated drift, not proven causation) and its likely inapplicability to Team Mode's 2-node structure
+  - Source citation caveat (semantic similarity proxy)
+  - Retrieval quality is topic-dependent
+  - Standing limitation: sentence-embedding cosine similarity produced smooth, non-bimodal distributions across every application tried
+
+## Recently completed
+- Round-scoped influence map (Individual Mode)
+- PDF export pagination and final-line clipping fixed
+- Influence map standalone PNG export
+- Comparative analysis — extremity AND position metrics, toggleable
+- RAG quality debugging and fix (content filtering, distance threshold calibration, empty-query fallback)
+- Source citation verification via cosine similarity
+- Generalized agent personas — topic-agnostic, no hardcoded "regulation" framing
+- Report section hidden from Analysis tab while still included in PDF export
+- Multi-target influence attribution — investigated and deliberately deferred
+- Team Mode backend scaffolding — data model, memory scope, brainstorm step, presenter selection logic, and dispatch wrapper all written (Parts 1-4) — integration verified incomplete, see Week 8 sub-tasks above
+- Separate routed pages for Individual Mode and Team Mode with shared navbar
+
 
 ## Status
 
-Core pipeline (web RAG → 6-agent debate → moderator → analysis report) is functional end-to-end and validated across multiple topics spanning policy debates (AI regulation) and casual two-sided topics (cars vs bikes, pineapple on pizza, tea vs coffee). The web UI includes a live debate feed, agent extremity cards, collapsible moderator panel, an Analysis tab with extremity drift, position drift, and a round-scoped interactive influence map, a history browser with multi-run comparison, and a final report viewer cleanly separated from the Analysis tab display while still bundled into PDF exports. RAG retrieval quality has been debugged and calibrated with a real, data-driven distance threshold, and source citations are verified via cosine similarity rather than shown purely on retrieval availability. Agent personas are topic-agnostic. Influence attribution currently uses a simple, honestly-scoped "engagement-correlated position drift" model — a more principled algorithm is tracked as dedicated future research rather than a quick fix, after three investigated approaches were found insufficient.
-
-Remaining work is sequenced deliberately: the flagship team-debate extension (Week 8) comes first since it's the last major architectural change, followed by model comparison and a hosted vector DB migration (both meaningful only once the architecture is stable), then automation and refactoring (Week 9, safe to do only after the code stops changing shape), then pre-deploy hardening and deploy, with the final write-up documenting the full journey including dead ends. Automation work carries mandatory safety guardrails — no unattended scheduled runs, explicit cost confirmation required before any batch execution, and an account-level spending cap as the ultimate backstop — to prevent unintended API cost from unattended runs.
+Core individual-mode pipeline (web RAG → 6-agent debate → moderator → analysis report) remains fully functional and validated across multiple topics. Team Mode's backend logic (private brainstorm, presenter selection, team-level memory) and frontend scaffolding (separate routed page, navbar, mode-aware useSimulation hook) have been built, but end-to-end integration is not yet correct: the backend loop is currently behaving like Individual Mode rather than genuine team-based brainstorm-and-present behavior, live frontend updates aren't streaming for team-mode sessions, and the analysis metrics (extremity, position, influence map), final report, and saved transcript are all still using Individual Mode's shape regardless of which mode actually ran. History also doesn't yet distinguish between the two modes. These integration gaps are now broken out as explicit Week 8 sub-tasks and are the next work to complete before moving on to model comparison, automation, or deploy.

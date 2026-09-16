@@ -38,7 +38,7 @@ def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) ->
     collection_name = f"agent_{agent_name}_sources_{topic_key(topic)}"
     col = chroma.get_or_create_collection(collection_name)
 
-    print(f"DEBUG retrieve_agent_sources[{agent_id}]: collection={collection_name!r} count={col.count()} query={query!r}")  # add this
+    # print(f"DEBUG retrieve_agent_sources[{agent_id}]: collection={collection_name!r} count={col.count()} query={query!r}")  # add this
 
     if col.count() == 0:
         return []
@@ -53,8 +53,8 @@ def retrieve_agent_sources(agent_id: str, query: str, topic: str, n: int = 2) ->
     if not results["documents"][0]:
         return []
 
-    for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
-        print(f"  DEBUG dist={dist:.4f} [{meta['source_title']}] {doc[:80]!r}")  # add this
+    # for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+        # print(f"  DEBUG dist={dist:.4f} [{meta['source_title']}] {doc[:80]!r}")  # add this
 
     return [
         {

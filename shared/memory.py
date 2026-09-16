@@ -66,6 +66,33 @@ def recall_agent_history(agent_id: str, query: str, session_id: str, n: int = 3)
 
 
 
+# ================================= SHARED TEAM MEMORY =================================
+def get_team_channel_collection(team_name: str, session_id: str):
+    """Private brainstorm space for one team, one session — the 3 agents on 
+    this team can read each other's drafts here, opposing team cannot."""
+    return chroma.get_or_create_collection(f"team_{team_name}_channel_{session_id}")
+
+def store_team_draft(team_name: str, agent_id: str, draft: str, round_num: int, session_id: str):
+    col = get_team_channel_collection(team_name, session_id)
+    embedding = embedder.encode(draft).tolist()
+    col.upsert(
+        documents=[draft],
+        embeddings=[embedding],
+        ids=[f"{agent_id}_round_{round_num}"],
+        metadatas=[{"agent_id": agent_id, "round": round_num, "team": team_name}]
+    )
+
+def get_team_drafts_for_round(team_name: str, round_num: int, session_id: str) -> list[dict]:
+    """Retrieve all drafts submitted by this team for a specific round — 
+    used by the presenter-selection step (Part 3)."""
+    col = get_team_channel_collection(team_name, session_id)
+    results = col.get(where={"round": round_num})
+    return [
+        {"agent_id": meta["agent_id"], "draft": doc}
+        for doc, meta in zip(results["documents"], results["metadatas"])
+    ]
+# ======================================================================================
+
 
 def verify_source_usage(reply_text: str, sources: list[dict], threshold: float = 0.35) -> list[dict]:
     """

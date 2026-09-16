@@ -1,12 +1,12 @@
 const BASE = "http://localhost:8000"
 
-export const startSimulation = async (topic, maxRounds) => {
+export const startSimulation = async (topic, maxRounds, mode = "individual") => {
   const res = await fetch(`${BASE}/simulation/start`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ topic, max_rounds: maxRounds })
+    body: JSON.stringify({ topic, max_rounds: maxRounds, mode })
   })
-  return res.json()  // { session_id, status }
+  return res.json()
 }
 
 export const getStatus = async (sessionId) => {

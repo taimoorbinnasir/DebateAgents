@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from "react"
 import { startSimulation, openStream, getSnapshot } from "../api/simulation"
-import * as api from "../api/simulation"
 
-export default function useSimulation() {
+export default function useSimulation({ mode = "individual" } = {}) {
   const [sessionId, setSessionId]     = useState(null)
   const [status, setStatus]           = useState("idle")
   const [events, setEvents]           = useState([])
@@ -11,13 +10,18 @@ export default function useSimulation() {
   const [maxRounds, setMaxRoundsState] = useState(5)
   const [extremityLog, setExtremityLog] = useState({})
   const [errorDetail, setErrorDetail] = useState(null)
-  const [researchProgress, setResearchProgress] = useState({ completed: 0, total: 6 })
+  const [researchProgress, setResearchProgress] = useState({ completed: 0, total: mode === "team" ? 6 : 6 })
   const [influenceEdges, setInfluenceEdges] = useState([])
   const [positionLog, setPositionLog] = useState({})
-  const [userOpinions, setUserOpinions] = useState([])
   const esRef = useRef(null)
 
   function initAgents() {
+    if (mode === "team") {
+      return {
+        pro: { name: "PRO Team", stance: "pro", extremity: 0, statementCount: 0 },
+        con: { name: "CON Team", stance: "con", extremity: 0, statementCount: 0 },
+      }
+    }
     return {
       pro_hardliner:  { name: "Aggro",      stance: "pro", extremity: 0, statementCount: 0 },
       pro_moderate:   { name: "Elenchos",   stance: "pro", extremity: 0, statementCount: 0 },
@@ -92,7 +96,7 @@ export default function useSimulation() {
     }
   }
 
-  // Add this effect — runs once on mount, checks for existing session
+  // Reconnect on mount if a session_id is present in the URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const existingSession = params.get("session")
@@ -103,9 +107,10 @@ export default function useSimulation() {
         const snapshot = await getSnapshot(existingSession)
         setSessionId(existingSession)
 
-        // Rebuild full state from every event that already happened
         let rebuiltAgents = initAgents()
         let rebuiltExtremity = {}
+        let rebuiltPosition = {}
+        let rebuiltInfluence = []
         let rebuiltModerator = []
 
         snapshot.events.forEach(event => {
@@ -123,6 +128,16 @@ export default function useSimulation() {
               [event.agent_id]: [...(rebuiltExtremity[event.agent_id] || []), event.extremity]
             }
           }
+          if (event.type === "position_update") {
+            Object.entries(event.positions).forEach(([agentId, score]) => {
+              rebuiltPosition[agentId] = [...(rebuiltPosition[agentId] || []), score]
+            })
+          }
+          if (event.type === "influence_edge") {
+            rebuiltInfluence.push({
+              from: event.from, to: event.to, round: event.round, weight: event.weight
+            })
+          }
           if (event.type === "moderator_summary") {
             rebuiltModerator.push({ round: event.round, text: event.text })
           }
@@ -131,16 +146,19 @@ export default function useSimulation() {
         setEvents(snapshot.events)
         setAgents(rebuiltAgents)
         setExtremityLog(rebuiltExtremity)
+        setPositionLog(rebuiltPosition)
+        setInfluenceEdges(rebuiltInfluence)
         setModerator(rebuiltModerator)
         setMaxRoundsState(snapshot.max_rounds)
         setStatus(snapshot.status)
 
-        // If still running, attach to live stream for what's still coming
         if (snapshot.status === "running") {
           esRef.current = openStream(existingSession, handleEvent)
         }
       } catch (e) {
-        console.error("Failed to reconnect:", e)
+        console.warn("Could not reconnect to session (may have expired):", e)
+        window.history.replaceState(null, "", window.location.pathname)
+        setStatus("idle")
       }
     }
 
@@ -149,9 +167,7 @@ export default function useSimulation() {
     return () => esRef.current?.close()
   }, [])
 
-
   const start = async (topic, rounds) => {
-    // Reset state
     setExtremityLog({})
     setEvents([])
     setAgents(initAgents())
@@ -160,20 +176,18 @@ export default function useSimulation() {
     setErrorDetail(null)
     setInfluenceEdges([])
     setPositionLog({})
-    setUserOpinions([])
     setStatus("running")
 
-    const { session_id } = await startSimulation(topic, rounds)
+    const { session_id } = await startSimulation(topic, rounds, mode)
     setSessionId(session_id)
     window.history.replaceState(null, "", `?session=${session_id}`)
 
-    // Open SSE stream
     esRef.current = openStream(session_id, handleEvent)
   }
 
   return {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
-    positionLog, userOpinions, setUserOpinions, maxRounds, researchProgress,
+    positionLog, maxRounds, researchProgress,
     errorDetail, influenceEdges, start
   }
 }

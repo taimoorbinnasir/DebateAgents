@@ -113,6 +113,13 @@ REASONING_STYLES = {
 }
 
 
+# Define the team composition to argue as a team
+TEAM_COMPOSITION = {
+    "pro": ["pro_hardliner", "pro_moderate", "pro_pragmatist"],
+    "con": ["con_hardliner", "con_moderate", "con_pragmatist"],
+}
+
+
 
 def build_system_prompt(agent_id: str, topic: str = None) -> str:
     p = AGENT_PARAMS[agent_id]

@@ -1,19 +1,19 @@
 import { useState, useRef, useEffect } from "react"
 import { Link } from "react-router-dom"
-import { getReport } from "./api/simulation"
-import { exportElementToPDF } from "./utils/exportPDF"
-import useSimulation   from "./hooks/useSimulation"
-import TopicForm       from "./components/TopicForm"
-import AgentCard       from "./components/AgentCard"
-import DebateFeed      from "./components/DebateFeed"
-import ModeratorPanel  from "./components/ModeratorPanel"
-import ExtremityChart  from "./components/ExtremityChart"
-import ReportModal     from "./components/ReportModal"
-import ReportContent   from "./components/ReportContent"
-import InfluenceMap    from "./components/InfluenceMap"
-import PositionChart   from "./components/PositionChart"
+import { getReport } from "../api/simulation"
+import { exportElementToPDF } from "../utils/exportPDF"
+import useSimulation   from "../hooks/useSimulation"
+import TopicForm       from "../components/TopicForm"
+import AgentCard       from "../components/AgentCard"
+import DebateFeed      from "../components/DebateFeed"
+import ModeratorPanel  from "../components/ModeratorPanel"
+import ExtremityChart  from "../components/ExtremityChart"
+import ReportModal     from "../components/ReportModal"
+import ReportContent   from "../components/ReportContent"
+import InfluenceMap    from "../components/InfluenceMap"
+import PositionChart   from "../components/PositionChart"
 
-export default function App() {
+export default function TeamMode() {
   const [view, setView] = useState("live")  // "live" | "analysis"
   const [reportOpen, setReportOpen] = useState(false)
   const [reportContent, setReportContent] = useState(null)
@@ -25,7 +25,7 @@ export default function App() {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
     positionLog, maxRounds, researchProgress,
     errorDetail, influenceEdges, start
-  } = useSimulation()
+  } = useSimulation({ mode: "team" })
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
   const conAgents = Object.entries(agents).filter(([_, a]) => a.stance === "con")
@@ -126,7 +126,7 @@ export default function App() {
           <div className="flex gap-4 h-[75vh]">
 
             <div className="w-48 flex-shrink-0 overflow-y-auto">
-              <h2 className="text-xs font-semibold text-green-600 uppercase mb-2">PRO</h2>
+              <h2 className="text-xs font-semibold text-green-600 uppercase mb-2">PRO TEAM</h2>
               {proAgents.map(([id, agent]) => (
                 <AgentCard key={id} agent={agent} />
               ))}
@@ -140,7 +140,7 @@ export default function App() {
             </div>
 
             <div className="w-48 flex-shrink-0 overflow-y-auto">
-              <h2 className="text-xs font-semibold text-red-600 uppercase mb-2">CON</h2>
+              <h2 className="text-xs font-semibold text-red-600 uppercase mb-2">CON TEAM</h2>
               {conAgents.map(([id, agent]) => (
                 <AgentCard key={id} agent={agent} />
               ))}
