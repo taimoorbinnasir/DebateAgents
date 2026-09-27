@@ -18,6 +18,7 @@ Each agent searches the web with a personality-biased query (SerpApi)
 Sources chunked, filtered, embedded, stored per-agent in ChromaDB (topic-scoped)
       ↓
 Agents debate in interleaved PRO/CON turns across N rounds (Claude Haiku, isolated API contexts per agent)
+  — Team Mode instead: per team, per round: 3 drafts → 3 critiques → 1 synthesis by a rotating presenter
       ↓
 Each agent recalls its own past statements (session-scoped memory) + retrieves relevant sources
       ↓
@@ -35,67 +36,78 @@ Structured analysis report generated and saved (session_id-keyed filename)
 - Embeddings: `sentence-transformers` (`all-MiniLM-L6-v2`)
 - LLM: Claude Haiku via Anthropic API, isolated `Anthropic()` client calls per agent turn (not LangChain — LangChain was abandoned early due to version instability)
 
-## Key files (paths as referenced throughout development — verify against actual repo)
+## Key files
 
 ```
 DebateAgents/
 ├── shared/
-│   ├── agents.py        — AGENT_PARAMS (6 personas), TEAM_COMPOSITION, build_system_prompt(), REASONING_STYLES
+│   ├── agents.py        — AGENT_PARAMS (6 personas), TEAM_COMPOSITION, build_system_prompt(), REASONING_STYLES,
+│   │                      moderator_summary(shared_history, round_num, statements_per_round=6, team_mode=False)
 │   ├── config.py         — topic_key() hashing, LANGUAGE_INSTRUCTION constant
-│   ├── memory.py          — ChromaDB client, embedder, store/recall functions (agent + team channel scopes)
+│   ├── memory.py          — ChromaDB client, embedder, store/recall functions (agent + team channel scopes);
+│   │                        store_team_draft(..., kind="draft"|"critique") — kind is part of the id
 │   ├── chunker.py          — chunk_recursive(), is_valid_chunk() (content quality filter)
 │   ├── ingest.py            — web search → chunk → embed → store, topic-scoped
 │   ├── retrieve.py           — retrieve_agent_sources() with distance filtering
-│   └── tools.py                — shared LLM instance (legacy LangChain remnant, mostly unused now)
+│   └── tools.py                — shared LLM instance (legacy LangChain remnant, still used by scoring calls)
 ├── Week5/
-│   ├── eval.py            - EVALUATION FILES: score_extremity, print_extremity_chart, score_positions_batch, compute_influence_edges, conclude_simulation
-│   ├── DebateAgents.py          — CORE SIMULATION FILE: run_individual_round_loop, run_team_round_loop, 
-│                             run_simulation_streamed (mode dispatcher), agent_respond, team_brainstorm,
-│                             select_presenter, score_extremity, score_positions_batch, 
-│                             compute_influence_edges, moderator_summary, should_stop, should_stop_team,
-│                             conclude_simulation
-│   └── helpers.py            - HELPER FUNCTIONS: get_last_opponent_statement, get_last_ally_statement, should_stop, clean_history, extract_agent_id_from_message
+│   ├── DebateAgents.py    — CORE SIMULATION FILE: run_individual_round_loop, run_team_round_loop,
+│   │                         run_simulation_streamed (mode dispatcher), agent_respond,
+│   │                         team mode: agent_draft_argument, agent_critique, synthesize_team_statement,
+│   │                         team_brainstorm (streams brainstorm_* events), to_citations,
+│   │                         score_team_positions_batch, should_stop_team
+│   ├── helpers.py           — get_last_opponent_statement / get_last_ally_statement (individual format "Name: ..."),
+│   │                         get_last_team_statement (team format "PRO TEAM (Name): ..."), clean_history, should_stop
+│   └── eval.py               — score_extremity, score_positions_batch, compute_influence_edges, conclude_simulation,
+│                               display_name() (agent_id → persona name, "pro"/"con" → "PRO team")
 ├── backend/
-│   ├── main.py             — FastAPI routes (/simulation/start, /status, /snapshot, /stream, 
-│   │                         /opinion [deprecated/reverted], /simulations, /simulations/compare, 
+│   ├── main.py             — FastAPI routes (/simulation/start, /status, /snapshot, /stream, /events,
+│   │                         /opinion [deprecated/reverted], /simulations, /simulations/compare,
 │   │                         /simulations/{id}/detail, /simulations/{id}/report)
-│   ├── manager.py            — SimulationManager: in-memory state, background thread, push_event(), 
-│   │                          record_opinion() [deprecated]
-│   └── models.py               — Pydantic schemas (SimulationRequest now needs `mode` field added)
+│   ├── manager.py            — SimulationManager: in-memory state (includes "mode"), background thread,
+│   │                          push_event(), record_opinion() [deprecated]
+│   ├── models.py               — Pydantic schemas (SimulationRequest has `mode`)
+│   └── sse.py                    — SSE generator; forwards every event type as-is
 └── frontend/src/
-    ├── main.jsx                — Router setup (needs updating: Landing, IndividualMode, TeamMode, HistoryPage)
+    ├── main.jsx                — Router setup
     ├── pages/
-    │   ├── Landing.jsx          — NEW, mode-selection landing page (written, not yet tested)
-    │   ├── IndividualMode.jsx  — renamed from App.jsx, fully working
-    │   ├── TeamMode.jsx         — NEW, mirrors IndividualMode structure, NOT YET WORKING (see below)
+    │   ├── LandingPage.jsx      — mode selection
+    │   ├── IndividualMode.jsx  — 6-agent live view
+    │   ├── TeamMode.jsx         — 2-team live view (identical structure to IndividualMode; no InfluenceMap)
     │   └── HistoryPage.jsx      — needs mode toggle/filter added (not yet done)
     ├── components/
-    │   ├── Navbar.jsx            — NEW, written
-    │   ├── TopicForm, AgentCard, DebateFeed, ModeratorPanel, ExtremityChart, PositionChart,
-    │   │   InfluenceMap, ReportModal, ReportContent, ComparisonView, SourceBadge — all working
+    │   ├── DebateFeed.jsx        — chat layout (PRO left, CON right, both modes); groups brainstorm_* events
+    │   ├── BrainstormBlock.jsx  — Team Mode typing bubble + collapsible proposals/critiques with per-proposal sources
+    │   ├── ExtremityChart / PositionChart — draw one line per key present in the log (6 agents or 2 teams)
+    │   ├── Navbar, TopicForm, AgentCard, ModeratorPanel, InfluenceMap, ReportModal, ReportContent,
+    │   │   ComparisonView, SourceBadge, FormattedText, RoundHeader
     │   └── (OpinionPrompt.jsx — built then DELIBERATELY REVERTED, do not resurrect without discussion)
-    ├── hooks/useSimulation.js   — now accepts { mode = "individual" }, needs verification this actually 
-    │                              threads through correctly end-to-end with TeamMode.jsx
-    ├── api/simulation.js       — startSimulation() needs `mode` param added if not already
+    ├── hooks/useSimulation.jsx  — accepts { mode }, passes it to startSimulation; state rebuilt from events on reconnect
+    ├── api/simulation.js       — startSimulation(topic, maxRounds, mode)
     └── utils/exportPDF.js       — whitespace-aware pagination, working correctly
 ```
 
 ## Current state — what works, what doesn't
 
 ### ✅ Fully working: Individual Mode
-Complete pipeline validated on multiple topics (AI regulation, cars vs bikes, pineapple on pizza, tea vs coffee). All UI features work: live feed, extremity/position charts, round-scoped influence map (with standalone PNG export, node names always visible), history browser with multi-run comparison, PDF export (report hidden from Analysis tab view but included in export via off-screen-then-revealed DOM trick), session reconnect via snapshot endpoint.
+Complete pipeline validated on multiple topics. All UI features work: live feed (now chat-style), extremity/position charts, round-scoped influence map (with standalone PNG export), history browser with multi-run comparison, PDF export, session reconnect via snapshot endpoint.
 
-### ⚠️ Scaffolded but broken: Team Mode (Week 8 flagship feature)
-**Backend and frontend code exists for team mode, but does NOT actually work as team mode.** Confirmed symptoms as of last session:
-1. Backend loop (`run_team_round_loop`) is producing behavior identical to Individual Mode — each of the 6 agents speaks individually, rather than: 3 agents privately brainstorm → 1 LLM call selects best draft → that becomes the team's single public statement (2 statements/round total, not 6)
-2. Frontend doesn't stream live updates for team-mode sessions (SSE connection or event handling likely broken for this mode specifically)
-3. Extremity chart, position chart, and influence map are still using individual 6-agent data shape even when team mode ran
-4. Final report (`conclude_simulation`) generates using individual-mode framing regardless of actual mode
-5. Saved transcript JSON uses individual-mode's shape regardless of actual mode
-6. No `mode` field exists on saved transcripts, so past runs can't be distinguished
-7. History page has no way to filter/toggle between Individual and Team runs
+### ✅ Working end-to-end (persistence still incomplete): Team Mode
+Per team, per round, in order (PRO then CON):
+1. `agent_draft_argument` ×3: isolated proposals responding to the opposing team's last statement
+2. `agent_critique` ×3: each member sees all 3 proposals (shuffled) → keep / drop / missing
+3. `synthesize_team_statement` ×1: the presenter writes the single public statement in their persona voice
+4. `score_extremity` on the final statement only
 
-**Diagnosis not yet completed** — the actual `run_team_round_loop` code was never pasted for review before this handoff; the specific bug (dispatcher not routing correctly? loop internally falling through to `agent_respond`? some other issue?) needs fresh investigation.
+- **Presenter:** `TEAM_COMPOSITION[team][(round - 1 + offset) % 3]`, with `offset` random once per session per team. No merit selection.
+- **Sources:** per-proposal sources are verified against that proposal. The pool of those is shown to the presenter, and the final statement is verified against the pool.
+- **Memory:** all 3 members store the team's public statement; proposals and critiques go to the team channel.
+- **History format:** `"PRO TEAM (Presenter): text"`. The presenter's name is deliberately kept in the history (owner's choice). Agents are instead told `TEAM_ADDRESS_INSTRUCTION` ("refer to the other side as 'the opposing team'").
+- **Events:** `brainstorm_start`, `brainstorm_draft` (with `sources`), `brainstorm_critique`, then `agent_statement` with `agent_id: "pro"|"con"`, `presenter`, and `sources`.
+- **Frontend:** a typing bubble while the team brainstorms (CON on the right), collapsing to a toggle when done; 2-line charts; InfluenceMap replaced by a note; the report button appears on completion.
+- **Cost:** ~18 LLM calls per round (Individual Mode ~12).
+
+**Not done yet** (see "Immediate next task"): team-aware report wording, team-shaped transcript saving, the `mode` field on disk, and the History page.
 
 ## Critical architectural decisions and WHY (do not relitigate without cause)
 
@@ -108,8 +120,17 @@ Complete pipeline validated on multiple topics (AI regulation, cars vs bikes, pi
 7. **Source citations verified via cosine similarity** (reply embedding vs. source chunk embedding, threshold ~0.35) rather than shown purely on retrieval availability — prevents citing sources that were retrieved but not actually reflected in the agent's reply.
 8. **PDF export uses html2canvas + custom whitespace-aware pagination** (not naive fixed-height slicing, which caused content duplication and mid-line cuts before being fixed). Report section is hidden from normal Analysis-tab view via an off-screen-then-temporarily-revealed DOM technique (required because `display:none` is invisible to html2canvas, but `position:absolute; left:-9999px` sometimes also fails to capture — the working fix reveals the element at `position:static` immediately before capture, then hides it again after).
 
+9. **Team Mode = propose → critique → synthesize, not select-the-best.** The original best-of-3 + LLM-judge design was abandoned: members never collaborated, and the judge had fixed option order (hardliner first) and a silent fallback to option 1.
+10. **The presenter rotates with a random start; it is never chosen on merit.** Merit selection brings back judge bias and mixes up voice with argument. A fixed start would confound extremity drift with the rotation order. `presenter_log` records who presented, for later control.
+11. **The moderator's window equals statements per round** (`statements_per_round`: 6 individual, 2 team). A fixed window of 6 in Team Mode leaked the previous round and the moderator's own summary into its input.
+12. **Log keys differ by mode:** agent_ids in Individual Mode, `"pro"`/`"con"` in Team Mode. Any code that indexes `AGENT_PARAMS[key]` on a log must go through `display_name()` (eval.py) or equivalent. This bug caused the "Simulation error: pro" crash.
+
 ## Known non-blocking issues
 - (Resolved) PDF export final-line clipping — was fixed.
+- The owner noted further Team Mode frontend errors to triage next session (not yet itemized).
+- ESLint flags unused `_` variables in IndividualMode.jsx / TeamMode.jsx (pre-existing, harmless).
+- `shared/__pycache__/*.pyc` is tracked in git; consider adding `__pycache__/` to .gitignore.
+- Moderator summaries generated before the plain-language fix were produced without LANGUAGE_INSTRUCTION (a literal placeholder was being sent), so they aren't directly comparable with later runs.
 
 ## Deliberately deferred / do not build without discussion
 - **Interactive user participation mode** (user as free-text 7th debater) — distinct from the reverted "opinion slider" feature; a real future feature, not yet built.
@@ -118,15 +139,13 @@ Complete pipeline validated on multiple topics (AI regulation, cars vs bikes, pi
 
 ## Immediate next task (where the last session left off)
 
-**Fix Team Mode so it actually functions as team mode**, per the 7 sub-tasks below (all filed under "Week 8" in the project to-do list):
+Team Mode now runs correctly live. The remaining Week 8 sub-tasks:
 
-1. Fix `run_team_round_loop` in `Week5/Phase2.py` to genuinely call `team_brainstorm()` → `select_presenter()` → single team statement, not per-agent individual responses. **First step: get the user to paste the actual current contents of `run_team_round_loop` and the `run_simulation_streamed` dispatcher to diagnose why it's behaving like Individual Mode.**
-2. Fix live SSE streaming for team-mode sessions in the frontend (`TeamMode.jsx`, `useSimulation.js`).
-3. Rework analysis metrics for 2-team comparison instead of 6-agent — extremity/position charts should show 2 lines; InfluenceMap likely needs to be removed or replaced for team mode (2-node graph reduces to one trivial edge).
-4. Fix `conclude_simulation`'s report generation to use team-aware framing (2 teams' position drift, presenter selection patterns) instead of individual-agent framing.
-5. Fix transcript saving to use team-mode's actual data shape (2-key logs, presenter_log) instead of silently reusing individual-mode's schema.
-6. Add a `mode` field to every saved transcript/report at save time.
-7. Update `HistoryPage.jsx` to toggle/filter between Individual and Team runs, and correctly render team-mode's data shape in the detail view.
+1. **Triage the Team Mode frontend errors** the owner observed (ask for specifics; diagnose with real evidence first).
+2. **Make the `conclude_simulation` report team-aware.** It no longer crashes, but the prompt still asks about "agents". Needs team framing, and should use `presenter_log` (pass it in from `run_team_round_loop`).
+3. **Save team-shaped transcripts:** include `presenter_log` and `brainstorm_log` (already collected in `run_team_round_loop`, not yet written).
+4. **Write the `mode` field into every saved transcript and report** (it's in the manager's in-memory state; it isn't passed to `conclude_simulation` yet).
+5. **HistoryPage.jsx:** an Individual / Team / All filter or badge, and a detail view that renders team data (2-line charts, no influence map, optionally the saved brainstorms).
 
 ## After Team Mode is genuinely fixed, the roadmap continues:
 

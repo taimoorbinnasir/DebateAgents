@@ -4,9 +4,13 @@ A multi-agent debate simulation studying how AI agents with distinct personaliti
 
 Six agents — three arguing **PRO**, three arguing **CON** — debate a user-supplied topic over multiple rounds. Each agent has a fixed stance, a distinct reasoning style, and parametric personality traits (extremity, concession probability, rhetorical intensity) that shape how it argues. A neutral moderator evaluates each round. A web research layer lets agents ground their arguments in real sources they find themselves, biased toward their own worldview.
 
+The simulation runs in two modes:
+- **Individual Mode** — all six agents speak for themselves, six statements per round.
+- **Team Mode** — each side of three agents brainstorms privately (propose → critique → synthesize) and presents one team statement per round, two statements per round in total.
+
 ## Research question
 
-Does an extremist agent pull the rest of the group toward its position over time, or does it become isolated? More broadly: how do personality, evidence access, and group dynamics shape the trajectory of a multi-agent disagreement?
+Does an extremist agent pull the rest of the group toward its position over time, or does it become isolated? More broadly: how do personality, evidence access, and group dynamics shape the trajectory of a multi-agent disagreement? Team Mode adds a second question: when agents with different temperaments have to agree on one shared statement, does the team moderate or amplify its members?
 
 ## How it works
 
@@ -28,6 +32,21 @@ Simulation ends on round limit or conversation convergence
 A structured analysis report is generated and saved
 ```
 
+### Team Mode round
+
+Each team's turn runs in order (PRO first, then CON), and each step is a separate, isolated API call:
+
+```
+1. Draft      (×3)  each member privately proposes an argument, responding to the opposing team's last statement
+2. Critique   (×3)  each member reads all three proposals (shuffled) → what to keep, what to drop, what's missing
+3. Synthesize (×1)  this round's presenter writes the team's single public statement, in their own persona voice
+4. Score      (×1)  extremity is scored on the final statement only
+```
+
+- **Presenter:** round-robin within the team, with a random starting member chosen once per session. There is no "best presenter" judgment (see [Design notes](#design-notes)).
+- **Sources:** each proposal keeps only the sources verified against its own text. The presenter sees the pooled sources the proposals actually used, and the final statement is verified against that pool.
+- **Moderator:** sees only the current round's two team statements and evaluates PRO team vs CON team.
+
 ### Agents
 
 | Name | Stance | Reasoning style | Extremity |
@@ -44,9 +63,10 @@ Each agent is a fictional character in a structured academic debate simulation �
 ## Architecture
 
 - **Backend:** FastAPI + Python. Simulation runs in a background thread; events stream to the frontend via Server-Sent Events (SSE).
-- **Frontend:** React (Vite) + Tailwind. Live debate feed, agent extremity cards, collapsible moderator panel, analysis dashboard, and a history page for past runs.
+- **Frontend:** React (Vite) + Tailwind. A landing page to pick a mode, a chat-style live debate feed (PRO on the left, CON on the right), agent extremity cards, a collapsible moderator panel, an analysis dashboard, and a history page for past runs. In Team Mode, each team's private brainstorm streams live into a collapsible "brainstorming…" typing bubble that shows each member's proposal (with the sources it used) and critique.
 - **Memory:** ChromaDB (local, persistent) with `sentence-transformers` embeddings.
-  - **Agent private memory** — scoped per simulation session (fresh each debate)
+  - **Agent private memory** — scoped per simulation session (fresh each debate). In Team Mode, all three members store the team's public statement, so their next proposals stay consistent with what the team actually said.
+  - **Team channel** (Team Mode) — scoped per team per session; holds that team's proposals and critiques
   - **Agent source memory (RAG)** — scoped per topic (reused across sessions on the same topic, avoids redundant web searches)
 - **Web research:** SerpApi + custom HTML extraction, chunked with a recursive chunker and filtered for quality before ingestion.
 - **LLM:** Claude Haiku via the Anthropic API, called with isolated context per agent (no shared conversation state between agents at the API level — only the orchestrator-controlled shared transcript).
@@ -79,7 +99,18 @@ cd frontend
 npm run dev
 ```
 
-Open `http://localhost:5173`, enter a topic, choose a round count, and start the debate.
+Open `http://localhost:5173`, pick Individual or Team Mode, enter a topic, choose a round count, and start the debate.
+
+To run without the frontend, start the backend and use the API directly:
+
+```bash
+curl -s -X POST localhost:8000/simulation/start \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "tea vs coffee", "max_rounds": 2, "mode": "team"}'
+
+# then stream the events live, using the returned session_id
+curl -N localhost:8000/simulation/<session_id>/stream
+```
 
 ## Project structure
 
@@ -94,17 +125,22 @@ DebateAgents/
 │   ├── retrieve.py         # source retrieval with distance filtering
 │   └── tools.py             # LangChain LLM instance, shared tools
 ├── Week5/
-│   └── Phase2.py         # core simulation loop, agent turns, moderator, stopping conditions
+│   ├── DebateAgents.py   # simulation loops (individual + team), agent turns, team brainstorm, mode dispatcher
+│   ├── helpers.py         # history lookups (last opponent / ally / team statement), stopping conditions
+│   └── eval.py             # extremity + position scoring, influence edges, final report
 ├── backend/
 │   ├── main.py            # FastAPI routes
 │   ├── manager.py          # simulation state, background thread, SSE event queue
 │   └── models.py            # Pydantic schemas
 ├── frontend/
 │   └── src/
-│       ├── App.jsx           # live view (feed + agent cards + analysis toggle)
-│       ├── pages/HistoryPage.jsx  # past simulation browser
-│       ├── components/         # AgentCard, DebateFeed, ModeratorPanel, ReportModal, etc.
-│       └── hooks/useSimulation.js  # SSE connection + live state
+│       ├── pages/
+│       │   ├── LandingPage.jsx     # mode selection
+│       │   ├── IndividualMode.jsx  # 6-agent live view (feed + agent cards + analysis toggle)
+│       │   ├── TeamMode.jsx         # 2-team live view
+│       │   └── HistoryPage.jsx      # past simulation browser
+│       ├── components/         # AgentCard, DebateFeed, BrainstormBlock, ModeratorPanel, ReportModal, etc.
+│       └── hooks/useSimulation.jsx  # SSE connection + live state (mode-aware)
 └── Resources/
     ├── <AgentName>/         # raw web sources each agent found
     └── simulations/          # saved transcripts (.json) + analysis reports (.md)
@@ -118,23 +154,23 @@ DebateAgents/
 
 **Why sources are topic-scoped but memory is session-scoped.** Re-running the same topic reuses previously found sources (saves SerpApi calls and embedding time), but each debate run gets a completely fresh memory of what was actually said — so agents don't "remember" arguments from a previous, unrelated run of the same topic.
 
+**Why Team Mode synthesizes instead of picking the best draft.** The first version had each member draft independently and an LLM judge pick one draft to publish word for word. In practice that was best-of-3 sampling, not a team: members never saw each other's work, and the judge had a built-in bias (option order was fixed, with the hardliner always first, and a parse failure silently chose option 1). The current flow makes members read and critique each other's proposals, and the final statement is written from all of them.
+
+**Why the presenter rotates instead of being chosen on merit.** The presenter doesn't choose an argument; they write the synthesis from all three proposals and critiques, so quality comes from the synthesis step. Choosing a "best" presenter would bring the judge bias back and mix up *whose voice* with *whose argument*. A fixed rotation order would also confound results: the hardliner would always open, and extremity drift across rounds would partly just be the rotation. So the rotation starts at a random member each session, and `presenter_log` records who presented each round.
+
+**Why the moderator's input window depends on the mode.** The moderator evaluates only the current round's statements: six in Individual Mode, two in Team Mode. A fixed six-line window in Team Mode pulled in the previous round and the moderator's own earlier summary.
+
 ## To-do
 
 **Week 8 — Flagship extensions**
 
-**Status:** Team Mode backend scaffolding integrated (Parts 1-4 of the original breakdown), but NOT actually running as team mode yet — currently a mislabeled copy of Individual Mode. Real team-mode behavior (brainstorm → presenter selection → single team statement) still needs to be verified/fixed end-to-end. Treat the sub-tasks below as the real remaining work before Team Mode is genuinely done.
+**Status:** Team Mode now runs end-to-end as genuine team mode: live propose → critique → synthesize brainstorm, rotating presenter, two statements per round, team-aware moderator, 2-line extremity and position charts, and a final report that generates without errors. The remaining sub-tasks are about what gets saved and how past runs are viewed.
 
-- Fix Team Mode's backend loop to actually behave like team mode, not individual mode. Currently run_team_round_loop is producing one statement per agent (6 total) exactly like run_individual_round_loop, rather than one statement per TEAM (2 total) via brainstorm+selection. Verify team_brainstorm() and select_presenter() are actually being called and their output is what gets appended to shared_history — not each agent responding individually and unprompted the way Individual Mode does.
-- Fix live frontend updates for Team Mode. Agents/teams are arguing correctly on the backend but the frontend (`TeamMode.jsx`, DebateFeed) isn't rendering the SSE events in real time. Check: is the SSE stream actually connected for team-mode sessions (openStream called correctly in `useSimulation({ mode: "team" })`), are agent_statement events actually being pushed with agent_id: "pro"/"con" as expected, and is DebateFeed receiving/rendering them.
-- Rework evaluation metrics for 2-team comparison instead of 6-agent comparison. Extremity chart, position chart, and influence map currently still operate on a 6-way individual-agent basis even for team-mode runs. Decide which metrics remain meaningful with only 2 comparison units:
-  - **Extremity chart:** keep, but should show exactly 2 lines ("PRO Team", "CON Team"), not 6
-  - **Position chart:** keep, same 2-line treatment
-  - **Influence map:** likely not meaningful with only 2 nodes — a 2-node graph reduces to a single bidirectional edge, which isn't worth visualizing as a "map." Consider removing InfluenceMap entirely from Team Mode's Analysis view, or replacing it with a simpler "who influenced whom, and by how much, per round" text/table summary instead
-- Fix final report generation for Team Mode. `conclude_simulation` is currently generating the report using Individual Mode's framing (referencing 6 named agents, extremity per individual, etc.) even for team-mode runs. Needs a team-aware report prompt — analyzing 2 teams' position drift and presenter patterns, not 6 agents' individual behavior. **Consider: should the report also comment on presenter selection (which agent got picked to speak each round, and whether that rotated or stayed fixed)?**
-- Fix transcript saving for Team Mode. Saved transcript JSON is currently being written in Individual Mode's shape/format regardless of which mode actually ran. Needs to correctly reflect team-mode's actual data: 2-key extremity/position logs, presenter_log, team-level statements — not silently reuse the individual-mode schema.
-- Add a mode field to every saved transcript/report, so past runs are correctly tagged as "individual" or "team" at save time (_currently no such field exists, so past runs can't be distinguished after the fact_).
-- Update History page to toggle/filter between Individual and Team runs. `HistoryPage.jsx` currently shows all past simulations mixed together with no way to distinguish mode. Add either a toggle (Individual / Team / All) or a badge per list item, using the new mode field from the transcript JSON. Also update `HistoryPage.jsx`'s detail view to correctly render team-mode's data shape (2-line charts, no influence map or a team-appropriate replacement, team-aware report) — same fixes as above, but for viewing past runs, not just live ones.
-- See the evaluation criterion for Presenter Selection. Currently, the backend is running the same way as Individual Mode, but only one of the agents with the best dist score is kept (_so it's essentially best-from-3 vs best-from-3 rather than an actual mutli-agent brainstorm_).
+- Make the final report team-aware. `conclude_simulation` no longer crashes on team data, but its prompt is still worded for six individual agents ("did any agent shift position?"). It needs a team framing: the two teams' position drift, and presenter patterns across rounds. **Consider: should the report also comment on how the presenter's persona shaped each team statement?**
+- Fix transcript saving for Team Mode. The saved JSON still uses Individual Mode's shape. It should include `presenter_log` and the per-round brainstorm (`brainstorm_log`: proposals, critiques, and the sources each used). Both are already collected in `run_team_round_loop` but not yet written.
+- Add a `mode` field to every saved transcript/report, so past runs are tagged "individual" or "team" at save time. The mode is now carried through the backend and stored in the in-memory session state, but it isn't saved to disk yet.
+- Update the History page to toggle/filter between Individual and Team runs (a toggle or a badge per item, using the new `mode` field), and make its detail view render team-mode data: 2-line charts, no influence map, team-aware report, and optionally the saved brainstorms.
+- Remaining Team Mode frontend errors noted during testing (to be triaged next session).
 
 <hr>
 
@@ -179,6 +215,8 @@ DebateAgents/
   - Source citation caveat (semantic similarity proxy)
   - Retrieval quality is topic-dependent
   - Standing limitation: sentence-embedding cosine similarity produced smooth, non-bimodal distributions across every application tried
+  - Team Mode: the presenter's persona shapes each team statement's tone, so team extremity partly reflects who presented that round (recorded in `presenter_log`)
+  - Moderator summaries from runs before the plain-language fix were generated without the language instruction (a literal `{LANGUAGE_INSTRUCTION}` placeholder was being sent), so they aren't directly comparable with later runs
 
 ## Recently completed
 - Round-scoped influence map (Individual Mode)
@@ -190,10 +228,20 @@ DebateAgents/
 - Generalized agent personas — topic-agnostic, no hardcoded "regulation" framing
 - Report section hidden from Analysis tab while still included in PDF export
 - Multi-target influence attribution — investigated and deliberately deferred
-- Team Mode backend scaffolding — data model, memory scope, brainstorm step, presenter selection logic, and dispatch wrapper all written (Parts 1-4) — integration verified incomplete, see Week 8 sub-tasks above
 - Separate routed pages for Individual Mode and Team Mode with shared navbar
+- Team Mode now actually runs: the `mode` sent by the frontend was being dropped in `main.py`/`manager.py`, so every run fell back to Individual Mode. The same fix restored Individual Mode's live streaming, which a positional-argument bug in the mode dispatcher had broken.
+- Team Mode brainstorm redesigned: propose → critique → synthesize, replacing the best-of-3 LLM-judge selection
+- Presenter rotation with a random start per session (replaces judge-based presenter selection)
+- Opponent lookup fixed for team-format statements (drafters were always told "no opponent statement yet")
+- Agents told to refer to the other side as "the opposing team", not by individual names
+- Team-aware moderator: correct per-mode input window, team framing, and the language instruction now actually applied (was sent as a literal placeholder, in both modes)
+- Per-proposal source attribution, with pooled sources verified against the final team statement
+- Live "brainstorming…" typing bubble with expandable proposals, critiques, and per-proposal sources
+- Chat-style debate feed in both modes (PRO left, CON right)
+- Team Mode extremity and position charts (2 lines); influence map replaced with an explanatory note in Team Mode
+- "Simulation error: pro" crash at the end of Team Mode runs fixed, which also restores the final report button
 
 
 ## Status
 
-Core individual-mode pipeline (web RAG → 6-agent debate → moderator → analysis report) remains fully functional and validated across multiple topics. Team Mode's backend logic (private brainstorm, presenter selection, team-level memory) and frontend scaffolding (separate routed page, navbar, mode-aware useSimulation hook) have been built, but end-to-end integration is not yet correct: the backend loop is currently behaving like Individual Mode rather than genuine team-based brainstorm-and-present behavior, live frontend updates aren't streaming for team-mode sessions, and the analysis metrics (extremity, position, influence map), final report, and saved transcript are all still using Individual Mode's shape regardless of which mode actually ran. History also doesn't yet distinguish between the two modes. These integration gaps are now broken out as explicit Week 8 sub-tasks and are the next work to complete before moving on to model comparison, automation, or deploy.
+Individual Mode (web RAG → 6-agent debate → moderator → analysis report) remains fully functional and validated across multiple topics. Team Mode now works end-to-end as a genuine team debate: each side brainstorms privately (propose → critique → synthesize), a rotating presenter delivers one statement per team per round, the moderator evaluates team vs team, and the live feed, charts, and final report all work for team runs. What's left for Team Mode is persistence and history: saving team-shaped transcripts (with presenter and brainstorm data), tagging saved runs with their mode, team-aware report wording, and a History page that can filter and display team runs. These are the next work before moving on to model comparison, automation, or deploy.

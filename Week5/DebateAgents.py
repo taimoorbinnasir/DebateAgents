@@ -182,40 +182,60 @@ def synthesize_team_statement(presenter_id: str, team_name: str, drafts: list[di
     statement = response.content[0].text
     print(f"  [synthesis] {p['name']}: {statement[:80]}...")
 
-    verified_sources = verify_source_usage(statement, sources)
-    cited_sources = [
+    return statement, to_citations(verify_source_usage(statement, sources))
+
+
+def to_citations(verified_sources: list[dict]) -> list[dict]:
+    """Same shape agent_respond sends to the frontend's SourceBadge."""
+    return [
         {"title": s["source_title"], "url": s["source_url"], "similarity": s["similarity"]}
         for s in verified_sources
     ]
-    return statement, cited_sources
 
 
 def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
-                    round_num: int, session_id: str) -> dict:
+                    round_num: int, session_id: str, push=None) -> dict:
     """
     Draft (x3, isolated) → Critique (x3, each sees all drafts) → Synthesize (x1, presenter).
-    Drafts and critiques are stored in the team's private channel.
+    Drafts and critiques are stored in the team's private channel, and streamed via push()
+    as they happen so the frontend can fill in its collapsible "Brainstorming..." block.
+
+    Sources: each draft keeps only the sources verified against that draft; the pool of
+    those is what the presenter sees, and the final statement is verified against the pool.
     """
+    push = push or (lambda event: None)
     agent_ids = TEAM_COMPOSITION[team_name]
     opponent_stmt = get_last_team_statement(other_team(team_name), shared_history)
 
     print(f"\n💭 {team_name.upper()} team brainstorming (round {round_num})...")
+    push({"type": "brainstorm_start", "team": team_name, "round": round_num, "presenter": presenter_id})
 
     drafts, pooled_sources, seen_urls = [], [], set()
     for agent_id in agent_ids:
         draft, sources = agent_draft_argument(agent_id, team_name, shared_history, round_num, session_id)
         store_team_draft(team_name, agent_id, draft, round_num, session_id, kind="draft")
-        drafts.append({"agent_id": agent_id, "draft": draft})
-        for s in sources:
+        used_sources = verify_source_usage(draft, sources)
+        drafts.append({"agent_id": agent_id, "draft": draft, "sources": to_citations(used_sources)})
+        for s in used_sources:
             if s["source_url"] not in seen_urls:
                 seen_urls.add(s["source_url"])
                 pooled_sources.append(s)
+        push({
+            "type": "brainstorm_draft", "team": team_name, "round": round_num,
+            "agent_id": agent_id, "agent_name": AGENT_PARAMS[agent_id]["name"],
+            "text": draft, "sources": to_citations(used_sources)
+        })
 
     critiques = []
     for agent_id in agent_ids:
         critique = agent_critique(agent_id, team_name, drafts, opponent_stmt)
         store_team_draft(team_name, agent_id, critique, round_num, session_id, kind="critique")
         critiques.append({"agent_id": agent_id, "critique": critique})
+        push({
+            "type": "brainstorm_critique", "team": team_name, "round": round_num,
+            "agent_id": agent_id, "agent_name": AGENT_PARAMS[agent_id]["name"],
+            "text": critique
+        })
 
     statement, cited_sources = synthesize_team_statement(
         presenter_id, team_name, drafts, critiques, pooled_sources, shared_history
@@ -558,7 +578,8 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 members = TEAM_COMPOSITION[team_name]
                 presenter_agent_id = members[(round_num - 1 + presenter_offset[team_name]) % len(members)]
 
-                result = team_brainstorm(team_name, presenter_agent_id, shared_history, round_num, session_id)
+                result = team_brainstorm(team_name, presenter_agent_id, shared_history, round_num,
+                                         session_id, push=push)
                 statement_text = result["statement"]
 
                 presenter_name = AGENT_PARAMS[presenter_agent_id]["name"]
@@ -573,15 +594,6 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 # Every member remembers the team's public line, so next round's drafts stay consistent
                 for agent_id in members:
                     store_agent_statement(agent_id, statement_text, round_num, session_id)
-
-                push({
-                    "type": "team_brainstorm",
-                    "team": team_name,
-                    "round": round_num,
-                    "presenter": presenter_agent_id,
-                    "drafts": result["drafts"],
-                    "critiques": result["critiques"]
-                })
 
                 score = score_extremity(presenter_agent_id, statement_text)
                 team_extremity_log[team_name].append(score)

@@ -6,6 +6,13 @@ from shared.config import LANGUAGE_INSTRUCTION
 from shared.tools import llm
 
 
+def display_name(log_key: str) -> str:
+    """Log keys are agent_ids in individual mode, but 'pro'/'con' in team mode."""
+    if log_key in AGENT_PARAMS:
+        return AGENT_PARAMS[log_key]["name"]
+    return f"{log_key.upper()} team"
+
+
 # ===================== EXTREMITY =====================
 def score_extremity(agent_id: str, statement: str) -> int:
     response = llm.invoke(
@@ -29,7 +36,7 @@ def print_extremity_chart(extremity_log: dict):
     print()
     
     for agent_id, scores in extremity_log.items():
-        name = AGENT_PARAMS[agent_id]["name"]
+        name = display_name(agent_id)
         print(f"{name:<12}", end="")
         for s in scores:
             print(f"{s:<4}", end="")
@@ -106,7 +113,7 @@ def conclude_simulation(topic: str, shared_history: list,
                         structured_statements: list = None):
     transcript   = "\n".join(shared_history)
     scores_text  = "\n".join([
-        f"{AGENT_PARAMS[aid]['name']}: {scores}"
+        f"{display_name(aid)}: {scores}"
         for aid, scores in extremity_log.items()
     ])
 
@@ -114,7 +121,7 @@ def conclude_simulation(topic: str, shared_history: list,
     position_text = ""
     if position_log:
         position_text = "\n".join([
-            f"{AGENT_PARAMS[aid]['name']}: {scores}"
+            f"{display_name(aid)}: {scores}"
             for aid, scores in position_log.items()
         ])
 

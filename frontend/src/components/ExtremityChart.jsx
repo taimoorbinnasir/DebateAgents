@@ -7,6 +7,8 @@ const AGENT_COLORS = {
   Ekstros:    "#7C3AED",
   Eleftheria: "#2563EB",
   Hermes:     "#0891B2",
+  "PRO Team": "#16A34A",
+  "CON Team": "#DC2626",
 }
 
 export default function ExtremityChart({ extremityLog }) {
@@ -39,7 +41,7 @@ export default function ExtremityChart({ extremityLog }) {
         <YAxis domain={[0, 10]} fontSize={12} label={{ value: "Extremity", angle: -90, position: "insideLeft" }} />
         <Tooltip />
         <Legend />
-        {Object.values(AGENT_NAMES).map(name => (
+        {agentIds.map(id => AGENT_NAMES[id] || id).map(name => (
           <Line
             key={name}
             type="monotone"
@@ -62,4 +64,6 @@ const AGENT_NAMES = {
   con_hardliner:  "Ekstros",
   con_moderate:   "Eleftheria",
   con_pragmatist: "Hermes",
+  pro:            "PRO Team",
+  con:            "CON Team",
 }

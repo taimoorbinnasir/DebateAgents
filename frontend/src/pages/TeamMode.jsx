@@ -10,7 +10,6 @@ import ModeratorPanel  from "../components/ModeratorPanel"
 import ExtremityChart  from "../components/ExtremityChart"
 import ReportModal     from "../components/ReportModal"
 import ReportContent   from "../components/ReportContent"
-import InfluenceMap    from "../components/InfluenceMap"
 import PositionChart   from "../components/PositionChart"
 
 export default function TeamMode() {
@@ -24,7 +23,7 @@ export default function TeamMode() {
   const {
     sessionId, status, events, agents, extremityLog, moderatorSummaries,
     positionLog, maxRounds, researchProgress,
-    errorDetail, influenceEdges, start
+    errorDetail, start
   } = useSimulation({ mode: "team" })
 
   const proAgents = Object.entries(agents).filter(([_, a]) => a.stance === "pro")
@@ -173,9 +172,11 @@ export default function TeamMode() {
               </div>
             </div>
 
-            {/* Live, interactive graph — shown on screen, NOT captured in PDF export */}
-            <h2 className="text-sm font-semibold text-gray-700 mb-4 mt-8">Influence Map — Current Run</h2>
-            <InfluenceMap influenceEdges={influenceEdges} />
+            {/* No influence map in team mode: with only 2 speakers it reduces to a single edge */}
+            <p className="text-xs text-gray-400 mt-6">
+              The influence map is only available in Individual Mode. With two teams, it would reduce
+              to a single PRO ↔ CON edge and add nothing beyond the position drift chart above.
+            </p>
           </>
         )}
       </div>
