@@ -13,6 +13,14 @@ def get_last_opponent_statement(agent_id: str, shared_history: list) -> str:
                 return msg
     return ""
 
+# Team mode: statements are formatted as 'PRO TEAM (Aggro): ...'
+def get_last_team_statement(team_name: str, shared_history: list) -> str:
+    prefix = f"{team_name.upper()} TEAM ("
+    for msg in reversed(shared_history):
+        if msg.startswith(prefix):
+            return msg
+    return ""
+
 def get_last_ally_statement(agent_id: str, shared_history: list) -> str:
     my_stance = AGENT_PARAMS[agent_id]["stance"]
     my_name = AGENT_PARAMS[agent_id]["name"]

@@ -189,17 +189,32 @@ Debate rules:
 {LANGUAGE_INSTRUCTION}"""
 
 
-def moderator_summary(shared_history: list, round_num: int) -> str:
+def moderator_summary(shared_history: list, round_num: int,
+                      statements_per_round: int = len(AGENT_PARAMS), team_mode: bool = False) -> str:
+    """statements_per_round must match the mode (6 individual, 2 team) — otherwise the
+    slice pulls in the previous round and the moderator's own earlier summary."""
     mod_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    last_round = shared_history[-(len(AGENT_PARAMS)):]
+    last_round = shared_history[-statements_per_round:]
+
+    if team_mode:
+        framing = """This is a TEAM debate: each line is one team's single statement for the round
+(the name in parentheses is just the member who presented it). Evaluate the PRO team
+against the CON team, and refer to the sides as 'the PRO team' and 'the CON team',
+not by individual names.
+
+"""
+        drift = "- Whether either team's position shifted"
+    else:
+        framing = ""
+        drift = "- Whether any position drift occurred"
 
     response = mod_client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=300,
-        system="""You are a neutral academic moderator evaluating a debate.
+        system=f"""You are a neutral academic moderator evaluating a debate.
 Assess only the arguments made. Be brief and analytical.
 {LANGUAGE_INSTRUCTION}""",
-        messages=[{"role": "user", "content": f"""Evaluate Round {round_num}:
+        messages=[{"role": "user", "content": f"""{framing}Evaluate Round {round_num}:
 
 {chr(10).join(last_round)}
 
@@ -207,7 +222,7 @@ In 3-4 sentences identify:
 - Strongest argument made
 - Weakest argument made
 - Any logical fallacies
-- Whether any position drift occurred"""}]
+{drift}"""}]
     )
 
     summary = response.content[0].text

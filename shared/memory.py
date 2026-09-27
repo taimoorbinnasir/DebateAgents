@@ -72,21 +72,23 @@ def get_team_channel_collection(team_name: str, session_id: str):
     this team can read each other's drafts here, opposing team cannot."""
     return chroma.get_or_create_collection(f"team_{team_name}_channel_{session_id}")
 
-def store_team_draft(team_name: str, agent_id: str, draft: str, round_num: int, session_id: str):
+def store_team_draft(team_name: str, agent_id: str, draft: str, round_num: int, session_id: str,
+                     kind: str = "draft"):
+    """kind: "draft" or "critique" — part of the id so a member's critique
+    doesn't overwrite their draft for the same round."""
     col = get_team_channel_collection(team_name, session_id)
     embedding = embedder.encode(draft).tolist()
     col.upsert(
         documents=[draft],
         embeddings=[embedding],
-        ids=[f"{agent_id}_round_{round_num}"],
-        metadatas=[{"agent_id": agent_id, "round": round_num, "team": team_name}]
+        ids=[f"{agent_id}_{kind}_round_{round_num}"],
+        metadatas=[{"agent_id": agent_id, "round": round_num, "team": team_name, "kind": kind}]
     )
 
 def get_team_drafts_for_round(team_name: str, round_num: int, session_id: str) -> list[dict]:
-    """Retrieve all drafts submitted by this team for a specific round — 
-    used by the presenter-selection step (Part 3)."""
+    """Retrieve all drafts (not critiques) submitted by this team for a specific round."""
     col = get_team_channel_collection(team_name, session_id)
-    results = col.get(where={"round": round_num})
+    results = col.get(where={"$and": [{"round": round_num}, {"kind": "draft"}]})
     return [
         {"agent_id": meta["agent_id"], "draft": doc}
         for doc, meta in zip(results["documents"], results["metadatas"])

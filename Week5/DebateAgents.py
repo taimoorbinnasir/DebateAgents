@@ -14,8 +14,9 @@ from shared.memory import (
 )
 from .helpers import (
     get_last_ally_statement, 
-    get_last_opponent_statement, 
-    clean_history, 
+    get_last_opponent_statement,
+    get_last_team_statement,
+    clean_history,
     should_stop, 
     extract_agent_id_from_message
 )
@@ -29,81 +30,205 @@ from .eval import (
 
 
 
+# ===================== TEAM MODE: DRAFT → CRITIQUE → SYNTHESIZE =====================
+TEAM_ADDRESS_INSTRUCTION = "Refer to the other side as 'the opposing team', not by individual names."
+
+
+def other_team(team_name: str) -> str:
+    return "con" if team_name == "pro" else "pro"
+
+
+def format_team_contributions(items: list[dict], key: str) -> str:
+    """Shuffled so no member's contribution is always read first (position bias)."""
+    shuffled = random.sample(items, len(items))
+    return "\n\n".join([f"[{AGENT_PARAMS[i['agent_id']]['name']}]: {i[key]}" for i in shuffled])
+
+
 # Draft argument for team mode
-def agent_draft_argument(agent_id: str, team_name: str, shared_history: list, 
-                         round_num: int, session_id: str) -> str:
+def agent_draft_argument(agent_id: str, team_name: str, shared_history: list,
+                         round_num: int, session_id: str) -> tuple[str, list[dict]]:
     """
-    Generate ONE candidate argument for this agent's team, for this round.
-    This does NOT get spoken publicly — it's a draft, stored in the team's 
-    private channel for presenter-selection to evaluate (Part 3).
+    Step 1: this agent's private proposal for what the team should argue this round.
+    Not spoken publicly — teammates critique it, then the presenter synthesizes.
+    Returns (draft, retrieved sources) so sources can be pooled for synthesis.
     """
     agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[agent_id]
     topic = shared_history[0].replace("TOPIC: ", "").strip()
-    
+
     last_message = shared_history[-1] if len(shared_history) > 1 else topic
     past = recall_agent_history(agent_id, last_message, session_id, n=2)
     sources = retrieve_agent_sources(agent_id, last_message, topic, n=2)
-    last_opponent = get_last_opponent_statement(agent_id, shared_history)
+    last_opponent = get_last_team_statement(other_team(team_name), shared_history)
+    last_own_team = get_last_team_statement(team_name, shared_history)
     debate_lines = clean_history(shared_history)
-    
+
     sections = [f"Current debate on: {shared_history[0]}\n"]
-    
+
     if past:
-        sections.append("Your past statements (stay consistent):\n" + "\n".join(past))
-    
+        sections.append("Your team's past statements (stay consistent):\n" + "\n".join(past))
+
     if sources:
         cited = "\n".join([f"[{r['source_title']}]: {r['text'][:200]}" for r in sources])
         sections.append(f"Relevant sources (cite naturally if applicable):\n{cited}")
-    
+
+    if last_own_team:
+        sections.append(f"Your team's last statement:\n{last_own_team}")
+
     sections.append(
-        f"Opponent's most recent argument to address:\n"
+        f"Opposing team's most recent argument to address:\n"
         f"{last_opponent if last_opponent else 'No opponent statement yet — open the debate.'}"
     )
     sections.append("Recent conversation:\n" + "\n".join(debate_lines[-8:]))
-    
-    # Key difference from agent_respond: framed as drafting a PROPOSAL for the team,
-    # not as speaking directly — sets up Part 3's selection step correctly
+
+    # Framed as contributing to a shared brainstorm, not competing to be picked
     sections.append(
-        f"You are drafting a PROPOSED argument for your team's turn this round. "
-        f"Your team will pick the strongest proposal to actually present — "
-        f"this may or may not be yours. Write your strongest possible case "
-        f"as {p['name']} in 3-5 sentences."
+        f"Your team is brainstorming privately before its public turn. "
+        f"Propose the argument and evidence you think your team should make this round — "
+        f"your teammates will see your proposal and build on it. "
+        f"Write as {p['name']} in 3-5 sentences. {TEAM_ADDRESS_INSTRUCTION}"
     )
-    
+
     user_content = "\n\n".join(sections)
-    
+
     response = agent_client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=500,
         system=build_system_prompt(agent_id),
         messages=[{"role": "user", "content": user_content}]
     )
-    
+
     draft = response.content[0].text
     print(f"  [draft] {p['name']}: {draft[:80]}...")
-    
-    return draft
+
+    return draft, sources
 
 
-def team_brainstorm(team_name: str, shared_history: list, round_num: int, session_id: str) -> list[dict]:
+def agent_critique(agent_id: str, team_name: str, drafts: list[dict], opponent_stmt: str) -> str:
     """
-    Each of the 3 agents on this team independently drafts a candidate 
-    argument. All 3 drafts are stored in the team's private channel.
-    Returns the drafts so Part 3's presenter-selection can use them immediately
-    without a redundant DB read.
+    Step 2: this agent reads all 3 of its team's drafts and says what to keep,
+    what to drop, and what's missing. Short — it's input to synthesis, not a new draft.
+    """
+    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    p = AGENT_PARAMS[agent_id]
+
+    user_content = f"""Opposing team's most recent argument:
+{opponent_stmt if opponent_stmt else 'No opponent statement yet — your team opens the debate.'}
+
+Your team's proposed arguments for this round (including yours):
+{format_team_contributions(drafts, 'draft')}
+
+Critique these proposals for your team as {p['name']}, in 2-4 sentences:
+the single strongest point to keep, the weakest point to drop, and what is missing
+(e.g. the best rebuttal to the opposing team). Be specific and name which teammate's point you mean.
+{TEAM_ADDRESS_INSTRUCTION}"""
+
+    response = agent_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=300,
+        system=build_system_prompt(agent_id),
+        messages=[{"role": "user", "content": user_content}]
+    )
+
+    critique = response.content[0].text
+    print(f"  [critique] {p['name']}: {critique[:80]}...")
+
+    return critique
+
+
+def synthesize_team_statement(presenter_id: str, team_name: str, drafts: list[dict],
+                              critiques: list[dict], sources: list[dict],
+                              shared_history: list) -> tuple[str, list[dict]]:
+    """
+    Step 3: this round's presenter writes the team's ONE public statement,
+    in their own persona voice, from all drafts + critiques + pooled sources.
+    """
+    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    p = AGENT_PARAMS[presenter_id]
+
+    last_opponent = get_last_team_statement(other_team(team_name), shared_history)
+    last_own_team = get_last_team_statement(team_name, shared_history)
+
+    sections = [f"Current debate on: {shared_history[0]}\n"]
+
+    if sources:
+        cited = "\n".join([f"[{r['source_title']}]: {r['text'][:200]}" for r in sources])
+        sections.append(f"Sources your team gathered (cite naturally if applicable):\n{cited}")
+
+    if last_own_team:
+        sections.append(f"Your team's last statement:\n{last_own_team}")
+
+    sections.append(
+        f"Opposing team's most recent argument to address:\n"
+        f"{last_opponent if last_opponent else 'No opponent statement yet — open the debate.'}"
+    )
+    sections.append(f"Your team's proposals:\n{format_team_contributions(drafts, 'draft')}")
+    sections.append(f"Your team's critiques of those proposals:\n{format_team_contributions(critiques, 'critique')}")
+    sections.append(
+        f"You are presenting for your team this round. Write your team's single public "
+        f"statement in your own voice as {p['name']}, in 3-5 sentences. Combine the strongest "
+        f"points from the proposals, act on the critiques, and address the opposing team's "
+        f"argument directly. Do not mention your team, the proposals, or the drafting process. "
+        f"{TEAM_ADDRESS_INSTRUCTION}"
+    )
+
+    response = agent_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=500,
+        system=build_system_prompt(presenter_id),
+        messages=[{"role": "user", "content": "\n\n".join(sections)}]
+    )
+
+    statement = response.content[0].text
+    print(f"  [synthesis] {p['name']}: {statement[:80]}...")
+
+    verified_sources = verify_source_usage(statement, sources)
+    cited_sources = [
+        {"title": s["source_title"], "url": s["source_url"], "similarity": s["similarity"]}
+        for s in verified_sources
+    ]
+    return statement, cited_sources
+
+
+def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
+                    round_num: int, session_id: str) -> dict:
+    """
+    Draft (x3, isolated) → Critique (x3, each sees all drafts) → Synthesize (x1, presenter).
+    Drafts and critiques are stored in the team's private channel.
     """
     agent_ids = TEAM_COMPOSITION[team_name]
-    drafts = []
-    
+    opponent_stmt = get_last_team_statement(other_team(team_name), shared_history)
+
     print(f"\n💭 {team_name.upper()} team brainstorming (round {round_num})...")
-    
+
+    drafts, pooled_sources, seen_urls = [], [], set()
     for agent_id in agent_ids:
-        draft = agent_draft_argument(agent_id, team_name, shared_history, round_num, session_id)
-        store_team_draft(team_name, agent_id, draft, round_num, session_id)
+        draft, sources = agent_draft_argument(agent_id, team_name, shared_history, round_num, session_id)
+        store_team_draft(team_name, agent_id, draft, round_num, session_id, kind="draft")
         drafts.append({"agent_id": agent_id, "draft": draft})
-    
-    return drafts
+        for s in sources:
+            if s["source_url"] not in seen_urls:
+                seen_urls.add(s["source_url"])
+                pooled_sources.append(s)
+
+    critiques = []
+    for agent_id in agent_ids:
+        critique = agent_critique(agent_id, team_name, drafts, opponent_stmt)
+        store_team_draft(team_name, agent_id, critique, round_num, session_id, kind="critique")
+        critiques.append({"agent_id": agent_id, "critique": critique})
+
+    statement, cited_sources = synthesize_team_statement(
+        presenter_id, team_name, drafts, critiques, pooled_sources, shared_history
+    )
+    print(f"  🎤 Presenter for {team_name.upper()}: {AGENT_PARAMS[presenter_id]['name']}")
+
+    return {
+        "presenter": presenter_id,
+        "statement": statement,
+        "sources":   cited_sources,
+        "drafts":    drafts,
+        "critiques": critiques,
+    }
 
 
 
@@ -226,12 +351,8 @@ def run_simulation(topic: str, max_rounds: int = 10):
 
 # ===================== SIMULATION LOOP FOR BACKEND =====================
 # Simulation loop that pushes events to a queue instead of printing
-def run_individual_round_loop(topic: str, max_rounds: int, session_id: str, 
-                             mode: str = "individual", event_queue=None):
-    """
-    mode: "individual" (current 6-agent behavior, default, unchanged) 
-          or "team" (3v3 brainstorm+presenter behavior, Part 2-4 of Week 8)
-    """
+def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
+                              event_queue=None):
     # If no queue provided, fall back to print behavior
     def push(event: dict):
         from backend.manager import push_event
@@ -351,54 +472,6 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
 
 
 
-def select_presenter(team_name: str, drafts: list[dict], shared_history: list) -> dict:
-    """
-    Evaluate 3 draft arguments from one team and select the strongest.
-    Returns the winning draft along with which agent presented it.
-    """
-    presenter_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    
-    topic = shared_history[0].replace("TOPIC: ", "").strip()
-    last_opponent_stmt = shared_history[-1] if len(shared_history) > 1 else "No opponent statement yet."
-    
-    drafts_text = "\n\n".join([
-        f"[Option {i+1} — {AGENT_PARAMS[d['agent_id']]['name']}]: {d['draft']}"
-        for i, d in enumerate(drafts)
-    ])
-    
-    response = presenter_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=200,
-        system="""You are selecting the strongest argument for a debate team to present. 
-Evaluate based on: relevance to the opponent's last point, persuasiveness, and clarity.
-Return ONLY the option number (1, 2, or 3), nothing else.""",
-        messages=[{"role": "user", "content": f"""Topic: {topic}
-
-Opponent's last statement to respond to:
-{last_opponent_stmt}
-
-Candidate arguments from the {team_name.upper()} team:
-{drafts_text}
-
-Which option is strongest? Reply with ONLY the number."""}]
-    )
-    
-    raw = response.content[0].text.strip()
-    
-    try:
-        selected_idx = int(raw[0]) - 1  # take first digit, handle "1" or "1." etc.
-        if selected_idx < 0 or selected_idx >= len(drafts):
-            selected_idx = 0  # fallback if the model returns something unexpected
-    except (ValueError, IndexError):
-        selected_idx = 0  # safe fallback — presenter selection failed, default to first draft
-    
-    selected = drafts[selected_idx]
-    print(f"  🎤 Presenter for {team_name.upper()}: {AGENT_PARAMS[selected['agent_id']]['name']} (option {selected_idx + 1})")
-    
-    return selected
-
-
-presenter_log = {"pro": [], "con": []}  # which agent_id presented each round, per team
 
 
 
@@ -460,9 +533,14 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
     team_position_log  = {"pro": [], "con": []}
     team_extremity_log = {"pro": [], "con": []}
     presenter_log       = {"pro": [], "con": []}
+    brainstorm_log      = []  # per team per round: drafts + critiques (for transcript saving later)
     shared_history = [f"TOPIC: {topic}"]
     stop_reason = f"Maximum rounds ({max_rounds}) reached"
-    
+
+    # Round-robin presenter with a random starting point per team, chosen once per session —
+    # otherwise the hardliner (listed first) would always present round 1
+    presenter_offset = {team: random.randrange(3) for team in ["pro", "con"]}
+
     all_agent_ids = TEAM_COMPOSITION["pro"] + TEAM_COMPOSITION["con"]
     push({"type": "research_start", "total_agents": len(all_agent_ids)})
     for i, agent_id in enumerate(all_agent_ids):
@@ -477,18 +555,34 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
             round_statements = {}  # collect for batch position scoring
             
             for team_name in ["pro", "con"]:
-                drafts = team_brainstorm(team_name, shared_history, round_num, session_id)
-                selected = select_presenter(team_name, drafts, shared_history)
-                presenter_agent_id = selected["agent_id"]
-                statement_text = selected["draft"]
-                
+                members = TEAM_COMPOSITION[team_name]
+                presenter_agent_id = members[(round_num - 1 + presenter_offset[team_name]) % len(members)]
+
+                result = team_brainstorm(team_name, presenter_agent_id, shared_history, round_num, session_id)
+                statement_text = result["statement"]
+
                 presenter_name = AGENT_PARAMS[presenter_agent_id]["name"]
                 statement = f"{team_name.upper()} TEAM ({presenter_name}): {statement_text}"
                 shared_history.append(statement)
                 presenter_log[team_name].append(presenter_agent_id)
-                
-                store_agent_statement(presenter_agent_id, statement_text, round_num, session_id)
-                
+                brainstorm_log.append({
+                    "team": team_name, "round": round_num, "presenter": presenter_agent_id,
+                    "drafts": result["drafts"], "critiques": result["critiques"]
+                })
+
+                # Every member remembers the team's public line, so next round's drafts stay consistent
+                for agent_id in members:
+                    store_agent_statement(agent_id, statement_text, round_num, session_id)
+
+                push({
+                    "type": "team_brainstorm",
+                    "team": team_name,
+                    "round": round_num,
+                    "presenter": presenter_agent_id,
+                    "drafts": result["drafts"],
+                    "critiques": result["critiques"]
+                })
+
                 score = score_extremity(presenter_agent_id, statement_text)
                 team_extremity_log[team_name].append(score)
                 round_statements[team_name] = statement_text
@@ -501,7 +595,8 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                     "round_num": round_num,
                     "text": statement_text,
                     "extremity": score,
-                    "presenter": presenter_agent_id
+                    "presenter": presenter_agent_id,
+                    "sources": result["sources"]
                 })
             
             # Batch position scoring — ONE call for both teams this round
@@ -512,10 +607,10 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
             push({"type": "position_update", "round": round_num, "positions": round_positions})
             
             # Moderator — reuse existing function unchanged, works on shared_history regardless of mode
-            mod_text = moderator_summary(shared_history, round_num)
+            mod_text = moderator_summary(shared_history, round_num, statements_per_round=2, team_mode=True)
             shared_history.append(f"MODERATOR: {mod_text}")
             push({"type": "moderator_summary", "round": round_num, "text": mod_text})
-            
+
             # Stopping conditions — reuse existing should_stop, 
             # but note: it checks len(AGENT_PARAMS) for repetition detection, 
             # which assumes 6 agents — needs a team-aware variant
@@ -544,9 +639,9 @@ def run_simulation_streamed(topic: str, max_rounds: int, session_id: str,
           or "team" (3v3 brainstorm+presenter mode, built out in Parts 2-4)
     """
     if mode == "team":
-        return run_team_round_loop(topic, max_rounds, session_id, event_queue)
+        return run_team_round_loop(topic, max_rounds, session_id, event_queue=event_queue)
     else:
-        return run_individual_round_loop(topic, max_rounds, session_id, event_queue)
+        return run_individual_round_loop(topic, max_rounds, session_id, event_queue=event_queue)
 
 
 # ===================== ENTRY POINT =====================

@@ -30,7 +30,7 @@ def health():
 @app.post("/simulation/start")
 def start_simulation(req: SimulationRequest):
     session_id = str(uuid.uuid4())[:8]
-    manager.start_simulation(session_id, req.topic, req.max_rounds)
+    manager.start_simulation(session_id, req.topic, req.max_rounds, req.mode)
     return {"session_id": session_id, "status": "started"}
 
 

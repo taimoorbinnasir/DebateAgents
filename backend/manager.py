@@ -44,7 +44,7 @@ def get_all_simulations() -> list[dict]:
     return list(reversed(results))  # newest first
 
 
-def start_simulation(session_id: str, topic: str, max_rounds: int):
+def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "individual"):
     """Initialize state and launch simulation in background thread."""
     
     # Per-session event queue — SSE reads from this
@@ -53,6 +53,7 @@ def start_simulation(session_id: str, topic: str, max_rounds: int):
     _simulations[session_id] = {
         "session_id":    session_id,
         "topic":         topic,
+        "mode":          mode,
         "status":        "running",
         "current_round": 0,
         "max_rounds":    max_rounds,
@@ -69,14 +70,14 @@ def start_simulation(session_id: str, topic: str, max_rounds: int):
     # Run simulation in background thread
     thread = threading.Thread(
         target=_run_simulation_thread,
-        args=(session_id, topic, max_rounds, event_queue),
+        args=(session_id, topic, max_rounds, mode, event_queue),
         daemon=True
     )
     thread.start()
 
 
 def _run_simulation_thread(session_id: str, topic: str, 
-                            max_rounds: int, event_queue: queue.Queue):
+                            max_rounds: int, mode: str, event_queue: queue.Queue):
     """Runs inside a background thread. Pushes events to queue."""
     try:
         # Import here to avoid circular imports at module load time
@@ -84,6 +85,7 @@ def _run_simulation_thread(session_id: str, topic: str,
             topic=topic,
             max_rounds=max_rounds,
             session_id=session_id,
+            mode=mode,
             event_queue=event_queue
         )
     except Exception as e:
