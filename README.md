@@ -63,7 +63,7 @@ Each agent is a fictional character in a structured academic debate simulation �
 ## Architecture
 
 - **Backend:** FastAPI + Python. Simulation runs in a background thread; events stream to the frontend via Server-Sent Events (SSE).
-- **Frontend:** React (Vite) + Tailwind. A landing page to pick a mode, a chat-style live debate feed (PRO on the left, CON on the right), agent extremity cards, a collapsible moderator panel, an analysis dashboard, and a history page for past runs. In Team Mode, each team's private brainstorm streams live into a collapsible "brainstorming…" typing bubble that shows each member's proposal (with the sources it used) and critique.
+- **Frontend:** React (Vite) + Tailwind. A landing page to pick a mode, a chat-style live debate feed (PRO on the left, CON on the right), agent extremity cards, a collapsible moderator panel, an analysis dashboard, and a history page for past runs. In Team Mode, each team's private brainstorm streams live into a collapsible "brainstorming…" typing bubble that shows each member's proposal (with the sources it used) and critique. The feed only follows new content when you're already at the bottom; if you've scrolled up, a "↓ N new" button appears instead. The History page lists past runs newest first and can be filtered by mode.
 - **Memory:** ChromaDB (local, persistent) with `sentence-transformers` embeddings.
   - **Agent private memory** — scoped per simulation session (fresh each debate). In Team Mode, all three members store the team's public statement, so their next proposals stay consistent with what the team actually said.
   - **Team channel** (Team Mode) — scoped per team per session; holds that team's proposals and critiques
@@ -162,21 +162,17 @@ DebateAgents/
 
 ## To-do
 
-**Week 8 — Flagship extensions**
+**Week 8 — Flagship extensions ✅ Complete**
 
-**Status:** Team Mode now runs end-to-end as genuine team mode: live propose → critique → synthesize brainstorm, rotating presenter, two statements per round, team-aware moderator, 2-line extremity and position charts, and a final report that generates without errors. The remaining sub-tasks are about what gets saved and how past runs are viewed.
+Team Mode is complete end-to-end: live propose → critique → synthesize brainstorms, rotating presenter, team-aware moderator and report, team-shaped transcripts tagged with their mode, and a History page that filters by mode and shows each team run's saved brainstorms. See [Recently completed](#recently-completed) for the full list.
 
-- Make the final report team-aware. `conclude_simulation` no longer crashes on team data, but its prompt is still worded for six individual agents ("did any agent shift position?"). It needs a team framing: the two teams' position drift, and presenter patterns across rounds. **Consider: should the report also comment on how the presenter's persona shaped each team statement?**
-- Fix transcript saving for Team Mode. The saved JSON still uses Individual Mode's shape. It should include `presenter_log` and the per-round brainstorm (`brainstorm_log`: proposals, critiques, and the sources each used). Both are already collected in `run_team_round_loop` but not yet written.
-- Add a `mode` field to every saved transcript/report, so past runs are tagged "individual" or "team" at save time. The mode is now carried through the backend and stored in the in-memory session state, but it isn't saved to disk yet.
-- Update the History page to toggle/filter between Individual and Team runs (a toggle or a badge per item, using the new `mode` field), and make its detail view render team-mode data: 2-line charts, no influence map, team-aware report, and optionally the saved brainstorms.
-- Remaining Team Mode frontend errors noted during testing (to be triaged next session).
+Deferred to a later week (not started): dynamic agent count and mid-debate topic injection.
 
 <hr>
 
 **Model comparison**
 
-- Compare Haiku vs Sonnet vs Opus on debate quality — run only once the system is feature-complete and stable (after Week 8's flagship extensions are genuinely finished, per the sub-tasks above). Run on shortened simulations (3-4 rounds) to control cost.
+- **Next up.** Compare Haiku vs Sonnet vs Opus on debate quality, now that Week 8 is finished and both modes are stable. Run on shortened simulations (3-4 rounds) to control cost. Team Mode costs ~18 LLM calls per round vs ~12 for Individual Mode, so budget for that when choosing which mode to compare on.
 - Analyze outputs and determine which model fits which task best
 
 <hr>
@@ -240,8 +236,16 @@ DebateAgents/
 - Chat-style debate feed in both modes (PRO left, CON right)
 - Team Mode extremity and position charts (2 lines); influence map replaced with an explanatory note in Team Mode
 - "Simulation error: pro" crash at the end of Team Mode runs fixed, which also restores the final report button
+- Mode-specific final report: Team Mode uses its own prompt (team position drift, presenter effect, team radicalization, fault lines, verdict), and the report file records the mode
+- Mode-specific transcript saving: every saved run has a `mode` field. Team runs also save `presenter_log`, `brainstorm_log` (proposals, critiques, per-proposal sources) and team statements. Older runs without `mode` are inferred from their logs
+- History page: an All / Individual / Team toggle, a mode badge on each run, and a team detail view with the saved brainstorm shown above each team statement and no influence map. Comparisons label each run's mode and warn when modes are mixed
+- Fixed: History never showed per-statement sources (the `/detail` endpoint's response model dropped `statements`), and Individual Mode saved only one statement per round. Older individual runs with incomplete statements fall back to the raw transcript
+- History ordered newest first. It had been sorted by filename, and filenames became random session ids, so the order was effectively random. New runs now save a `saved_at` time; older runs fall back to the file's modified time
+- History page polish: a single "History" entry point (the navbar); "← Back to Live" goes one step back to the debate as you left it (pre-, mid- or post-run); larger, centered "History" heading; the mode tag shows only under "All", with a coloured mode heading under "Individual"/"Team"; each run shows topic, round count, and a small italic DD/MM/YYYY date; long topics end in "…"
+- Fixed duplicate events after reconnecting mid-run: the snapshot and the reopened stream both held events queued while the page was away. Events now carry a sequence number, and the frontend skips ones it has already applied
+- Debate feed no longer yanks you to the bottom on every update: it follows new content only when you're at the bottom, and otherwise shows a WhatsApp-style "↓ N new" button
 
 
 ## Status
 
-Individual Mode (web RAG → 6-agent debate → moderator → analysis report) remains fully functional and validated across multiple topics. Team Mode now works end-to-end as a genuine team debate: each side brainstorms privately (propose → critique → synthesize), a rotating presenter delivers one statement per team per round, the moderator evaluates team vs team, and the live feed, charts, and final report all work for team runs. What's left for Team Mode is persistence and history: saving team-shaped transcripts (with presenter and brainstorm data), tagging saved runs with their mode, team-aware report wording, and a History page that can filter and display team runs. These are the next work before moving on to model comparison, automation, or deploy.
+Week 8 is complete, and both modes are functional end-to-end. Individual Mode (web RAG → 6-agent debate → moderator → analysis report) remains validated across multiple topics. Team Mode runs a genuine team debate: private propose → critique → synthesize brainstorms, a rotating presenter, a team-aware moderator and report, and team-shaped saved transcripts. The History page lists runs of either mode newest first, with a mode filter and a team-aware detail view. Next up is model comparison (Haiku vs Sonnet vs Opus), followed by the hosted vector DB migration, automation, and deploy.

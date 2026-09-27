@@ -8,6 +8,7 @@ from backend.models import (
     SimulationTranscript, SimulationMeta
 )
 import backend.manager as manager
+from Week5.eval import infer_mode
 from .models import UserOpinion
 from .sse import simulation_stream
 
@@ -127,13 +128,17 @@ def get_saved_simulation(timestamp: str):
     
     return SimulationTranscript(
         session_id=    timestamp,
+        mode=          data.get("mode") or infer_mode(data.get("extremity_log")),
         topic=         data.get("topic", ""),
         stop_reason=   data.get("stop_reason", ""),
         transcript=    data.get("transcript", []),
         extremity_log= data.get("extremity_log", {}),
         position_log=    data.get("position_log", {}),
         influence_edges= data.get("influence_edges", []),
-        user_opinions=   data.get("user_opinions", [])
+        user_opinions=   data.get("user_opinions", []),
+        statements=      data.get("statements", []),
+        presenter_log=   data.get("presenter_log", {}),
+        brainstorm_log=  data.get("brainstorm_log", [])
     )
 
 
@@ -165,6 +170,7 @@ def compare_simulations(session_ids: list[str] = Query(...)):
             data = json.load(f)
         results.append({
             "session_id":     sid,
+            "mode":           data.get("mode") or infer_mode(data.get("extremity_log")),
             "topic":          data.get("topic", ""),
             "extremity_log":  data.get("extremity_log", {}),
             "position_log":   data.get("position_log", {}),

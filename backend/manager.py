@@ -2,6 +2,7 @@ import sys, os, threading, queue, json
 from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from Week5.DebateAgents import run_simulation_streamed
+from Week5.eval import infer_mode
 
 from backend.models import SimulationStatus, AgentStatement, ModeratorSummary
 
@@ -20,15 +21,18 @@ def get_all_simulations() -> list[dict]:
         return []
     
     results = []
-    for fname in sorted(os.listdir(sim_dir)):
+    for fname in os.listdir(sim_dir):
         if not fname.startswith("transcript_") or not fname.endswith(".json"):
             continue
         fpath = os.path.join(sim_dir, fname)
         try:
             with open(fpath) as f:
                 data = json.load(f)
-            # Extract timestamp from filename: transcript_20260810_143022.json
+            # Filenames are session ids (transcript_<session_id>.json), not dates — recency comes
+            # from saved_at, or the file's modified time for runs saved before saved_at existed
             timestamp = fname.replace("transcript_", "").replace(".json", "")
+            saved_at = data.get("saved_at") or datetime.fromtimestamp(
+                os.path.getmtime(fpath)).isoformat(timespec="seconds")
             results.append({
                 "session_id": timestamp,
                 "topic":      data.get("topic", "unknown"),
@@ -36,12 +40,14 @@ def get_all_simulations() -> list[dict]:
                 "rounds":     len(data.get("extremity_log", {}).get(
                                   list(data.get("extremity_log", {}).keys())[0], []
                               )) if data.get("extremity_log") else 0,
-                "stop_reason": data.get("stop_reason")
+                "stop_reason": data.get("stop_reason"),
+                "mode":        data.get("mode") or infer_mode(data.get("extremity_log")),
+                "saved_at":    saved_at
             })
         except Exception:
             continue
     
-    return list(reversed(results))  # newest first
+    return sorted(results, key=lambda r: r["saved_at"], reverse=True)  # newest first
 
 
 def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "individual"):
@@ -104,6 +110,9 @@ def push_event(session_id: str, event: dict):
     """Called by simulation to push an event to the SSE queue."""
     sim = _simulations.get(session_id)
     if sim:
+        # Sequence number: after a reconnect, the snapshot and the reopened stream can both
+        # contain events pushed while the client was away — the frontend drops seq it has seen
+        event["seq"] = len(sim["events"])
         sim["event_queue"].put(event)
         sim["events"].append(event)  # persist all events
         

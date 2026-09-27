@@ -29,6 +29,8 @@ export default function ComparisonView({ data }) {
   const extremityData = buildChartData("extremity_log")
   const positionData  = buildChartData("position_log")
   const chartData = metric === "extremity" ? extremityData : positionData
+  const mixedModes = new Set(runs.map(r => r.mode)).size > 1
+  const modeLabel = (run) => run.mode === "team" ? "Team" : "Individual"
 
   return (
     <div>
@@ -38,6 +40,12 @@ export default function ComparisonView({ data }) {
       <p className="text-xs text-gray-400 mb-4">
         {runs.map(r => r.topic).join(" · ")}
       </p>
+      {mixedModes && (
+        <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mb-4">
+          Mixing modes: Individual runs average 6 agents per round, Team runs average 2 teams.
+          The averages are on the same scale, but they measure different units.
+        </p>
+      )}
 
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4 w-fit">
         <button
@@ -89,7 +97,7 @@ export default function ComparisonView({ data }) {
         {runs.map((run, idx) => (
           <div key={idx} className="text-xs text-gray-500 flex items-center gap-2">
             <span className="w-3 h-3 rounded-full" style={{ background: RUN_COLORS[idx % RUN_COLORS.length] }} />
-            Run {idx + 1}: {run.topic} — {run.stop_reason}
+            Run {idx + 1} ({modeLabel(run)}): {run.topic} — {run.stop_reason}
           </div>
         ))}
       </div>

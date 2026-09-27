@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import RoundHeader     from "./RoundHeader"
 import FormattedText   from "./FormattedText"
 import SourceBadge     from "./SourceBadge"
@@ -26,14 +26,51 @@ function groupBrainstorms(events) {
   return groups
 }
 
+// Events that count as a new "response" for the jump-to-latest button
+const RESPONSE_TYPES = new Set(["agent_statement", "brainstorm_start"])
+const AT_BOTTOM_PX = 60
+
 export default function DebateFeed({ events, maxRounds }) {
-  const bottomRef = useRef(null)
+  const scrollRef = useRef(null)
+  const atBottomRef = useRef(true)   // is the reader at (or near) the bottom?
+  const seenCountRef = useRef(0)     // events.length at the last render
+  const [unseen, setUnseen] = useState(0)        // new responses below the reader
+  const [hasActivity, setHasActivity] = useState(false)  // any new content below (incl. brainstorm steps)
   const brainstorms = useMemo(() => groupBrainstorms(events), [events])
 
-  // Auto-scroll on new events
+  // WhatsApp-style: follow new content only if the reader is already at the bottom;
+  // otherwise leave their scroll position alone and surface a "jump to latest" button
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    const el = scrollRef.current
+    if (events.length < seenCountRef.current) {  // new simulation started
+      atBottomRef.current = true
+      setUnseen(0)
+      setHasActivity(false)
+    }
+    const added = events.slice(seenCountRef.current)
+    seenCountRef.current = events.length
+    if (!el || added.length === 0) return
+
+    if (atBottomRef.current) {
+      el.scrollTop = el.scrollHeight  // instant: a smooth scroll would briefly read as "not at bottom"
+    } else {
+      setUnseen(n => n + added.filter(e => RESPONSE_TYPES.has(e.type)).length)
+      setHasActivity(true)
+    }
   }, [events])
+
+  const handleScroll = () => {
+    const el = scrollRef.current
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < AT_BOTTOM_PX
+    if (atBottomRef.current) {
+      setUnseen(0)
+      setHasActivity(false)
+    }
+  }
+
+  const jumpToLatest = () => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" })
+  }
 
   if (!events.length) {
     return (
@@ -44,7 +81,8 @@ export default function DebateFeed({ events, maxRounds }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-2">
+    <div className="relative flex-1 min-h-0 flex flex-col">
+    <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-2">
       {events.map((event, i) => {
         if (event.type === "round_start") {
           return <RoundHeader key={i} round={event.round} maxRounds={maxRounds} />
@@ -85,7 +123,19 @@ export default function DebateFeed({ events, maxRounds }) {
         
         return null
       })}
-      <div ref={bottomRef} />
+    </div>
+
+    {hasActivity && (
+      <button
+        onClick={jumpToLatest}
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5
+                   bg-white border border-gray-200 shadow-md rounded-full px-3 py-1.5
+                   text-xs font-medium text-gray-700 hover:bg-gray-50"
+      >
+        <span>↓</span>
+        {unseen > 0 ? `${unseen} new` : "New activity"}
+      </button>
+    )}
     </div>
   )
 }

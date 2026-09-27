@@ -74,12 +74,14 @@ DebateAgents/
     │   ├── LandingPage.jsx      — mode selection
     │   ├── IndividualMode.jsx  — 6-agent live view
     │   ├── TeamMode.jsx         — 2-team live view (identical structure to IndividualMode; no InfluenceMap)
-    │   └── HistoryPage.jsx      — needs mode toggle/filter added (not yet done)
+    │   └── HistoryPage.jsx      — mode toggle (All/Individual/Team), mode heading/badges, team detail view,
+    │                              newest-first list, "Back to Live" = navigate(-1)
     ├── components/
-    │   ├── DebateFeed.jsx        — chat layout (PRO left, CON right, both modes); groups brainstorm_* events
+    │   ├── DebateFeed.jsx        — chat layout (PRO left, CON right, both modes); groups brainstorm_* events;
+    │   │                             follow-if-at-bottom scrolling + "↓ N new" button
     │   ├── BrainstormBlock.jsx  — Team Mode typing bubble + collapsible proposals/critiques with per-proposal sources
     │   ├── ExtremityChart / PositionChart — draw one line per key present in the log (6 agents or 2 teams)
-    │   ├── Navbar, TopicForm, AgentCard, ModeratorPanel, InfluenceMap, ReportModal, ReportContent,
+    │   ├── Navbar (the only link to History; carries the live session), TopicForm, AgentCard, ModeratorPanel, InfluenceMap, ReportModal, ReportContent,
     │   │   ComparisonView, SourceBadge, FormattedText, RoundHeader
     │   └── (OpinionPrompt.jsx — built then DELIBERATELY REVERTED, do not resurrect without discussion)
     ├── hooks/useSimulation.jsx  — accepts { mode }, passes it to startSimulation; state rebuilt from events on reconnect
@@ -92,7 +94,7 @@ DebateAgents/
 ### ✅ Fully working: Individual Mode
 Complete pipeline validated on multiple topics. All UI features work: live feed (now chat-style), extremity/position charts, round-scoped influence map (with standalone PNG export), history browser with multi-run comparison, PDF export, session reconnect via snapshot endpoint.
 
-### ✅ Working end-to-end (persistence still incomplete): Team Mode
+### ✅ Fully working: Team Mode (Week 8 complete)
 Per team, per round, in order (PRO then CON):
 1. `agent_draft_argument` ×3: isolated proposals responding to the opposing team's last statement
 2. `agent_critique` ×3: each member sees all 3 proposals (shuffled) → keep / drop / missing
@@ -107,7 +109,17 @@ Per team, per round, in order (PRO then CON):
 - **Frontend:** a typing bubble while the team brainstorms (CON on the right), collapsing to a toggle when done; 2-line charts; InfluenceMap replaced by a note; the report button appears on completion.
 - **Cost:** ~18 LLM calls per round (Individual Mode ~12).
 
-**Not done yet** (see "Immediate next task"): team-aware report wording, team-shaped transcript saving, the `mode` field on disk, and the History page.
+- **Report:** `conclude_simulation(..., mode, presenter_log, brainstorm_log)` picks `_team_report_prompt` or `_individual_report_prompt` (the latter's wording is unchanged).
+- **Saved transcript:** always has `mode` and `statements`; team runs also have `presenter_log` and `brainstorm_log` (drafts `{agent_id, agent_name, text, sources}`, critiques `{agent_id, agent_name, text}`, the same shape `BrainstormBlock` renders). Old files without `mode` go through `infer_mode()` (eval.py): logs keyed only by pro/con mean team.
+- **History:** an All / Individual / Team toggle, mode badges, and the team detail view (saved brainstorms above team statements, no influence map). `hasCompleteStatements()` falls back to raw transcript lines for old individual runs that saved one statement per round.
+
+### Shared UX behaviour (both modes)
+- **History ordering:** newest first, by `saved_at` (written by `conclude_simulation`), falling back to file mtime for older runs. Filenames are session ids, NOT dates, so never sort by filename.
+- **History entry point:** only the navbar's "History" link. It passes `?from=<session>&mode=<mode>`, read from `window.location` at click time, because `useSimulation` writes `?session=` with `history.replaceState`, which React Router doesn't see.
+- **"← Back to Live":** `navigate(-1)` (returns to the debate page as it was; `useSimulation` reconnects from `?session=`). Falls back to the `from`/`mode` params when `location.key === "default"` (History opened directly).
+- **Reconnect de-duplication:** `manager.push_event` stamps each event with `seq`; `useSimulation` drops any `seq <= lastSeqRef`. Without this, events queued while the page was away arrive twice (once in the snapshot, once from the reopened stream).
+- **Feed scrolling (`DebateFeed`):** follows new content only if the reader is within 60px of the bottom (instant scroll, not smooth, so it doesn't misread its own scroll as "scrolled up"); otherwise shows a "↓ N new" / "New activity" button.
+- **Layout:** chat-style feed (PRO left, CON right) in both modes.
 
 ## Critical architectural decisions and WHY (do not relitigate without cause)
 
@@ -127,29 +139,26 @@ Per team, per round, in order (PRO then CON):
 
 ## Known non-blocking issues
 - (Resolved) PDF export final-line clipping — was fixed.
-- The owner noted further Team Mode frontend errors to triage next session (not yet itemized).
-- ESLint flags unused `_` variables in IndividualMode.jsx / TeamMode.jsx (pre-existing, harmless).
+- ESLint flags unused `_` variables in IndividualMode.jsx / TeamMode.jsx, and a missing-dependency warning on useSimulation's mount effect (all pre-existing, harmless).
+- `index.css` sets `text-align: center` on `#root` (Vite template leftover). Set alignment explicitly (`text-left`) on new elements rather than changing the global rule.
 - `shared/__pycache__/*.pyc` is tracked in git; consider adding `__pycache__/` to .gitignore.
 - Moderator summaries generated before the plain-language fix were produced without LANGUAGE_INSTRUCTION (a literal placeholder was being sent), so they aren't directly comparable with later runs.
 
 ## Deliberately deferred / do not build without discussion
 - **Interactive user participation mode** (user as free-text 7th debater) — distinct from the reverted "opinion slider" feature; a real future feature, not yet built.
 - **Multi-target influence attribution** — see point 5 above. Genuinely investigated and abandoned; revisiting requires new methodology, not a quick fix.
-- **Dynamic agent count, mid-debate topic injection** — planned Week 8 items, not started.
+- **Dynamic agent count, mid-debate topic injection** — originally planned for Week 8, deferred to a later week, not started.
 
 ## Immediate next task (where the last session left off)
 
-Team Mode now runs correctly live. The remaining Week 8 sub-tasks:
+**Week 8 is complete** (owner-confirmed). Next is **model comparison** (item 1 below):
+- Haiku vs Sonnet vs Opus on debate quality, on short runs (3-4 rounds) to control cost.
+- Team Mode costs ~18 LLM calls per round vs ~12 for Individual Mode; confirm with the owner which mode(s) to compare, and the budget, before running anything.
+- The model is hardcoded as `"claude-haiku-4-5"` in 7 places: `Week5/DebateAgents.py` (draft, critique, synthesis, agent_respond), `Week5/eval.py` (report), `shared/agents.py` (moderator) and `shared/tools.py` (the LangChain `llm` used for extremity and position scoring). Making the model configurable is the first step. Decide whether the scorers and the moderator should stay fixed on one model so that scores remain comparable across the models being tested.
 
-1. **Triage the Team Mode frontend errors** the owner observed (ask for specifics; diagnose with real evidence first).
-2. **Make the `conclude_simulation` report team-aware.** It no longer crashes, but the prompt still asks about "agents". Needs team framing, and should use `presenter_log` (pass it in from `run_team_round_loop`).
-3. **Save team-shaped transcripts:** include `presenter_log` and `brainstorm_log` (already collected in `run_team_round_loop`, not yet written).
-4. **Write the `mode` field into every saved transcript and report** (it's in the manager's in-memory state; it isn't passed to `conclude_simulation` yet).
-5. **HistoryPage.jsx:** an Individual / Team / All filter or badge, and a detail view that renders team data (2-line charts, no influence map, optionally the saved brainstorms).
+## Roadmap (Team Mode is done; model comparison is next)
 
-## After Team Mode is genuinely fixed, the roadmap continues:
-
-1. Model comparison (Haiku vs Sonnet vs Opus) — deliberately deferred until Team Mode is stable
+1. Model comparison (Haiku vs Sonnet vs Opus) — NEXT, now that Team Mode is stable
 2. Hosted ChromaDB migration (required before deploy — local `PersistentClient` won't survive Render/Railway's ephemeral disk)
 3. Week 9 — Automation: Claude Code refactor pass, batch runner script, GitHub Actions — **all with mandatory safety guardrails**: no blind cron scheduling, explicit confirmation required before any batch run, Anthropic Console spending limit set BEFORE automation work begins (owner has explicitly stated concern about unattended overnight API spend)
 4. Future research: principled inter-agent influence algorithm (see point 5 above)

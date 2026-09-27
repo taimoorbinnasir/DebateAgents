@@ -440,6 +440,14 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
                     "extremity":  score,
                     "sources":    cited_sources
                 })
+                structured_statements.append({
+                    "agent_id":   agent_id,
+                    "agent_name": AGENT_PARAMS[agent_id]["name"],
+                    "stance":     AGENT_PARAMS[agent_id]["stance"],
+                    "round_num":  round_num,
+                    "text":       reply,
+                    "sources":    cited_sources
+                })
 
             # Batch score positions for this round — ONE call, not six
             round_positions = score_positions_batch(round_statements, topic)
@@ -448,14 +456,6 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
                 position_log[agent_id].append(score)
 
             push({"type": "position_update", "round": round_num, "positions": round_positions})
-            structured_statements.append({
-                "agent_id":   agent_id,
-                "agent_name": AGENT_PARAMS[agent_id]["name"],
-                "stance":     AGENT_PARAMS[agent_id]["stance"],
-                "round_num":  round_num,
-                "text":       reply,
-                "sources":    cited_sources
-            })
             
             # Moderator after each round
             mod_text = moderator_summary(shared_history, round_num)
@@ -553,7 +553,8 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
     team_position_log  = {"pro": [], "con": []}
     team_extremity_log = {"pro": [], "con": []}
     presenter_log       = {"pro": [], "con": []}
-    brainstorm_log      = []  # per team per round: drafts + critiques (for transcript saving later)
+    brainstorm_log      = []  # per team per round: drafts + critiques, saved with the transcript
+    structured_statements = []
     shared_history = [f"TOPIC: {topic}"]
     stop_reason = f"Maximum rounds ({max_rounds}) reached"
 
@@ -588,7 +589,16 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 presenter_log[team_name].append(presenter_agent_id)
                 brainstorm_log.append({
                     "team": team_name, "round": round_num, "presenter": presenter_agent_id,
-                    "drafts": result["drafts"], "critiques": result["critiques"]
+                    "drafts": [
+                        {"agent_id": d["agent_id"], "agent_name": AGENT_PARAMS[d["agent_id"]]["name"],
+                         "text": d["draft"], "sources": d["sources"]}
+                        for d in result["drafts"]
+                    ],
+                    "critiques": [
+                        {"agent_id": c["agent_id"], "agent_name": AGENT_PARAMS[c["agent_id"]]["name"],
+                         "text": c["critique"]}
+                        for c in result["critiques"]
+                    ]
                 })
 
                 # Every member remembers the team's public line, so next round's drafts stay consistent
@@ -609,6 +619,15 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                     "extremity": score,
                     "presenter": presenter_agent_id,
                     "sources": result["sources"]
+                })
+                structured_statements.append({
+                    "agent_id":   team_name,
+                    "agent_name": f"{team_name.upper()} Team ({presenter_name})",
+                    "stance":     team_name,
+                    "round_num":  round_num,
+                    "text":       statement_text,
+                    "presenter":  presenter_agent_id,
+                    "sources":    result["sources"]
                 })
             
             # Batch position scoring — ONE call for both teams this round
@@ -636,8 +655,10 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
         push({"type": "error", "error": str(e)})
     
     finally:
-        conclude_simulation(topic, shared_history, team_extremity_log, stop_reason, 
-                           session_id, team_position_log, [])  # empty influence_edges — team mode doesn't use per-agent influence tracking (see note below)
+        # No influence edges in team mode — with 2 speakers the graph reduces to a single edge
+        conclude_simulation(topic, shared_history, team_extremity_log, stop_reason,
+                            session_id, team_position_log, [], structured_statements,
+                            mode="team", presenter_log=presenter_log, brainstorm_log=brainstorm_log)
         push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 

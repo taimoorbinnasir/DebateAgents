@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react"
-import { Link } from "react-router-dom"
 import { getReport } from "../api/simulation"
 import { exportElementToPDF } from "../utils/exportPDF"
 import useSimulation   from "../hooks/useSimulation"
@@ -98,12 +97,6 @@ export default function TeamMode() {
                 📊 View Final Report
               </button>
             )}
-            <Link
-              to={sessionId ? `/history?from=${sessionId}` : "/history"}
-              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-            >
-              📚 Past Simulations →
-            </Link>
           </div>
         </div>
 

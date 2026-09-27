@@ -55,9 +55,13 @@ class SimulationTranscript(BaseModel):
     stop_reason:   str
     transcript:    list[str]
     extremity_log: dict
+    mode:            str  = "individual"   # "individual" | "team"
     position_log:    dict = {}
     influence_edges: list = []
     user_opinions:   list = []
+    statements:      list = []   # structured statements with sources
+    presenter_log:   dict = {}   # team mode: {"pro": [agent_id per round], "con": [...]}
+    brainstorm_log:  list = []   # team mode: per team per round drafts + critiques
 
 
 # ── Simulation list item ───────────────────────────
@@ -67,3 +71,5 @@ class SimulationMeta(BaseModel):
     timestamp:  str
     rounds:     int
     stop_reason: Optional[str] = None
+    mode:       str = "individual"
+    saved_at:   Optional[str] = None   # ISO time; drives newest-first ordering

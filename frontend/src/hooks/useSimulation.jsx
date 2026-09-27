@@ -14,6 +14,7 @@ export default function useSimulation({ mode = "individual" } = {}) {
   const [influenceEdges, setInfluenceEdges] = useState([])
   const [positionLog, setPositionLog] = useState({})
   const esRef = useRef(null)
+  const lastSeqRef = useRef(-1)  // highest event seq already applied (see handleEvent)
 
   function initAgents() {
     if (mode === "team") {
@@ -33,6 +34,12 @@ export default function useSimulation({ mode = "individual" } = {}) {
   }
 
   const handleEvent = (event) => {
+    // After a reconnect, the reopened stream re-delivers events that were queued while the
+    // page was away — they're already in the snapshot, so skip anything already applied
+    if (event.seq != null) {
+      if (event.seq <= lastSeqRef.current) return
+      lastSeqRef.current = event.seq
+    }
     setEvents(prev => [...prev, event])
 
     if (event.type === "research_start") {
@@ -144,6 +151,7 @@ export default function useSimulation({ mode = "individual" } = {}) {
         })
 
         setEvents(snapshot.events)
+        lastSeqRef.current = snapshot.events.length - 1
         setAgents(rebuiltAgents)
         setExtremityLog(rebuiltExtremity)
         setPositionLog(rebuiltPosition)
@@ -168,6 +176,7 @@ export default function useSimulation({ mode = "individual" } = {}) {
   }, [])
 
   const start = async (topic, rounds) => {
+    lastSeqRef.current = -1
     setExtremityLog({})
     setEvents([])
     setAgents(initAgents())

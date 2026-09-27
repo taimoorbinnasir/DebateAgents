@@ -1,4 +1,5 @@
 import sys, os, json, re
+from datetime import datetime
 from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from shared.agents import AGENT_PARAMS
@@ -107,24 +108,18 @@ def compute_influence_edges(position_log: dict, targeting_log: list) -> list:
 
 
 # ===================== CONCLUSION =====================
-def conclude_simulation(topic: str, shared_history: list,
-                        extremity_log: dict, stop_reason: str, session_id: str,
-                        position_log: dict = None, influence_edges: list = None,
-                        structured_statements: list = None):
-    transcript   = "\n".join(shared_history)
-    scores_text  = "\n".join([
-        f"{display_name(aid)}: {scores}"
-        for aid, scores in extremity_log.items()
-    ])
+def infer_mode(extremity_log: dict) -> str:
+    """For transcripts saved before the `mode` field existed: team runs log only 'pro'/'con'."""
+    keys = set(extremity_log or {})
+    return "team" if keys and keys <= {"pro", "con"} else "individual"
 
-    # Format position data for the report prompt (optional but useful context)
-    position_text = ""
-    if position_log:
-        position_text = "\n".join([
-            f"{display_name(aid)}: {scores}"
-            for aid, scores in position_log.items()
-        ])
 
+def _format_log(log: dict) -> str:
+    return "\n".join([f"{display_name(k)}: {scores}" for k, scores in (log or {}).items()])
+
+
+def _individual_report_prompt(topic, stop_reason, scores_text, position_text,
+                              influence_edges, transcript) -> str:
     influence_text = ""
     if influence_edges:
         influence_text = "\n".join([
@@ -133,13 +128,7 @@ def conclude_simulation(topic: str, shared_history: list,
             for e in influence_edges
         ])
 
-    print(f"\n{'='*60}\nGENERATING ANALYSIS REPORT...\n{'='*60}\n")
-
-    report_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    report_response = report_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1200,
-        messages=[{"role": "user", "content": f"""Analyze this debate transcript and write a structured report.
+    return f"""Analyze this debate transcript and write a structured report.
 
 {LANGUAGE_INSTRUCTION}
 Topic: {topic}
@@ -173,7 +162,87 @@ In 2-3 sentences: what was the core unresolvable disagreement?
 In 1-2 sentences: who argued most effectively on evidence quality alone?
 
 Transcript:
-{transcript}"""}]
+{transcript}"""
+
+
+def _team_report_prompt(topic, stop_reason, scores_text, position_text,
+                        presenter_log, transcript) -> str:
+    rounds = max((len(v) for v in (presenter_log or {}).values()), default=0)
+    presenter_text = "\n".join([
+        f"Round {r + 1}: " + ", ".join(
+            f"{team.upper()} team → {AGENT_PARAMS[ids[r]]['name']} ({AGENT_PARAMS[ids[r]]['reasoning_style']}, "
+            f"extremity trait {AGENT_PARAMS[ids[r]]['extremity']}/10)"
+            for team, ids in presenter_log.items() if r < len(ids)
+        )
+        for r in range(rounds)
+    ])
+
+    return f"""Analyze this TEAM debate transcript and write a structured report.
+
+{LANGUAGE_INSTRUCTION}
+Format: two teams of three agents each. Every round, each team privately drafted and critiqued
+proposals, then ONE member (the presenter) wrote the team's single public statement in their own
+persona voice. Presenters rotate in a fixed order with a random starting member — they are NOT
+chosen on merit, so do not treat who presented as a judgment of quality.
+
+Topic: {topic}
+Stop reason: {stop_reason}
+Extremity scores per team per round (1=moderate, 10=extreme):
+{scores_text}
+
+Position scores per team per round (-10 to +10, where the team stood on the topic):
+{position_text if position_text else "Not tracked for this run."}
+
+Presenter each round (with the presenter's persona):
+{presenter_text if presenter_text else "Not recorded."}
+
+STRICT LENGTH LIMIT: Write no more than 350 words total. Each section must be 
+2-3 sentences maximum. Be direct — state conclusions, not reasoning chains.
+Do not restate the scores or transcript back to the reader.
+
+## 1. Position Drift
+In 2-3 sentences: did either team shift position? Which team held firmer?
+
+## 2. Presenter Effect
+In 2-3 sentences: did a team's tone or extremity visibly change with who presented? Treat this as
+correlation, not proof — each statement also reflects the whole team's brainstorm.
+
+## 3. Radicalization
+In 2-3 sentences: did either team become more extreme over the rounds? What triggered it?
+
+## 4. Fault Lines
+In 2-3 sentences: what was the core unresolvable disagreement between the teams?
+
+## 5. Verdict
+In 1-2 sentences: which team argued most effectively on evidence quality alone?
+
+Transcript:
+{transcript}"""
+
+
+def conclude_simulation(topic: str, shared_history: list,
+                        extremity_log: dict, stop_reason: str, session_id: str,
+                        position_log: dict = None, influence_edges: list = None,
+                        structured_statements: list = None, mode: str = "individual",
+                        presenter_log: dict = None, brainstorm_log: list = None):
+    transcript    = "\n".join(shared_history)
+    scores_text   = _format_log(extremity_log)
+    position_text = _format_log(position_log)
+
+    if mode == "team":
+        prompt = _team_report_prompt(topic, stop_reason, scores_text, position_text,
+                                     presenter_log, transcript)
+    else:
+        prompt = _individual_report_prompt(topic, stop_reason, scores_text, position_text,
+                                           influence_edges, transcript)
+
+    print(f"\n{'='*60}\nGENERATING ANALYSIS REPORT...\n{'='*60}\n")
+
+    report_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    report_response = report_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=1200,
+        messages=[{"role": "user", "content": prompt}]
     )
     report_content = report_response.content[0].text
 
@@ -184,20 +253,28 @@ Transcript:
     transcript_path = os.path.join(output_dir, f"transcript_{session_id}.json")
     report_path     = os.path.join(output_dir, f"report_{session_id}.md")
 
+    saved = {
+        "saved_at":        datetime.now().isoformat(timespec="seconds"),
+        "mode":            mode,
+        "topic":           topic,
+        "stop_reason":     stop_reason,
+        "extremity_log":   extremity_log,
+        "position_log":    position_log or {},
+        "influence_edges": influence_edges or [],
+        "transcript":      shared_history,
+        "statements":      structured_statements or []
+    }
+    if mode == "team":
+        saved["presenter_log"]  = presenter_log or {}
+        saved["brainstorm_log"] = brainstorm_log or []
+
     with open(transcript_path, "w") as f:
-        json.dump({
-            "topic":           topic,
-            "stop_reason":     stop_reason,
-            "extremity_log":   extremity_log,
-            "position_log":    position_log or {},
-            "influence_edges": influence_edges or [],
-            "transcript":      shared_history,
-            "statements": structured_statements or []
-        }, f, indent=2)
+        json.dump(saved, f, indent=2)
 
     print_extremity_chart(extremity_log)
     with open(report_path, "w") as f:
         f.write(f"# Debate Simulation Report\n")
+        f.write(f"**Mode:** {'Team' if mode == 'team' else 'Individual'}\n")
         f.write(f"**Topic:** {topic}\n")
         f.write(f"**Stop reason:** {stop_reason}\n\n")
         f.write(report_content)
