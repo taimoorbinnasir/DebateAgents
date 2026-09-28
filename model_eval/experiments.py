@@ -23,14 +23,15 @@ EXPERIMENTS = {
         "max_spend_usd": 1.00,            # the runner stops before exceeding this
     },
 
-    # Main comparison: 5 repeats per model per mode, 3 rounds each. Estimated ≈ $6.
+    # Main comparison: 4 repeats (seeds) per model per mode, 3 rounds each.
+    # Estimated ≈ $7.04 from the pilot's measured costs.
     "main": {
         "topic":       "AI regulation",
         "modes":       ["individual", "team"],
         "profiles":    ["all_haiku", "all_sonnet", "all_opus"],
         "rounds":      3,
         "seeds":       [1, 2, 3, 4],
-        "max_spend_usd": 7.20,            # under the $8 workspace limit
+        "max_spend_usd": 7.20,            # $8 workspace limit − ~$0.80 already spent on the pilot
     },
 }
 

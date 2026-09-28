@@ -2,6 +2,8 @@
 
 Runs the same debates with different models and compares cost and debate behaviour.
 
+**For the full explanation (what's compared, every metric, and how to evaluate the results), see the [Model comparison section of the main README](../README.md#model-comparison-model_eval).** This file is the quick reference.
+
 ## How a comparison works
 
 - A **profile** picks the model for the debating roles (`agent_turn`, or `draft` / `critique` / `synthesis` in Team Mode). Profiles are `all_haiku`, `all_sonnet` and `all_opus`, defined in `shared/config.py`.
@@ -17,7 +19,9 @@ python -m model_eval.run_experiment pilot             # type "pilot" to confirm 
 python -m model_eval.summarize pilot                  # re-print the comparison table
 ```
 
-Suggested order: run **`pilot`** first (1 round, 1 run per model per mode, ≈ $0.40). It measures real Sonnet/Opus costs and shows whether anything gets truncated. Then **`main`** (3 rounds × 5 seeds, ≈ $6). Its dry-run estimate uses the pilot's measured costs automatically.
+Order: **`pilot`** first (1 round, 1 run per model per mode; done, ≈ $0.80 including the Opus re-run). It measures real costs and shows whether anything gets truncated. Then **`main`** (3 rounds × 4 seeds = 24 debates, ≈ $7.04, cap $7.20). Its estimate uses the pilot's measured costs automatically.
+
+Opus 5.5 gets +1,000 `max_tokens` for its thinking (`THINKING_ALLOWANCE` in `shared/config.py`), so it has the same room for its visible answer as the other models.
 
 Experiments are defined in `experiments.py`: topic, modes, profiles, rounds, seeds and a spend cap.
 
@@ -39,7 +43,8 @@ Experiments are defined in `experiments.py`: topic, modes, profiles, rounds, see
 | `logs/<run>.log` | Everything the simulation printed during that run |
 | `spend_log.jsonl` | One line per run with the actual vs estimated cost. Append-only, so it includes interrupted runs |
 | `experiment.json` | The spec, profiles and prices used when the experiment started |
-| `summary.csv` | The comparison table |
+| `summary.csv` | The comparison table (averages) |
+| `runs.csv` | One row per debate, with its seed; use it for seed-by-seed comparisons |
 
 These runs don't appear on the History page, which only reads `Resources/simulations/`.
 

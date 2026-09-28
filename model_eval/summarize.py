@@ -3,7 +3,8 @@ Summarize an experiment's results into one comparison table per mode.
 
     python -m model_eval.summarize pilot
 
-Writes model_eval/results/<experiment>/summary.csv as well.
+Writes model_eval/results/<experiment>/summary.csv (averages) and runs.csv (one row per
+completed run, with its seed — use it to see the spread behind each average).
 
 Metrics (averaged over runs; each run's numbers come from its saved transcript):
 - cost, cost/round, calls   — real API spend from cost_log
@@ -70,7 +71,7 @@ def _mean(values):
 
 
 def summarize(experiment_id: str) -> list[dict]:
-    groups, interrupted = defaultdict(list), defaultdict(int)
+    groups, interrupted, per_run = defaultdict(list), defaultdict(int), []
     for path in sorted(glob.glob(os.path.join(RESULTS_DIR, experiment_id, "transcript_*.json"))):
         with open(path) as f:
             t = json.load(f)
@@ -78,7 +79,17 @@ def summarize(experiment_id: str) -> list[dict]:
         if str(t["stop_reason"]).startswith("Simulation interrupted"):
             interrupted[key] += 1
             continue
-        groups[key].append(run_metrics(t))
+        m = run_metrics(t)
+        groups[key].append(m)
+        per_run.append({"mode": key[0], "profile": key[1], "seed": t.get("seed"), **m})
+
+    if per_run:
+        order = {p: i for i, p in enumerate(MODEL_PROFILES)}
+        per_run.sort(key=lambda r: (r["mode"], order.get(r["profile"], 99), r["seed"] or 0))
+        with open(os.path.join(RESULTS_DIR, experiment_id, "runs.csv"), "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(per_run[0]))
+            writer.writeheader()
+            writer.writerows(per_run)
 
     rows = []
     # profiles in MODEL_PROFILES order (cheapest → most capable), not alphabetical
@@ -129,7 +140,7 @@ def print_summary(experiment_id: str):
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    print(f"  CSV: {path}")
+    print(f"  CSV: {path} (averages) and runs.csv (every run, with its seed)")
 
 
 if __name__ == "__main__":
