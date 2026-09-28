@@ -1,7 +1,7 @@
 import os, random
 from anthropic import Anthropic
 from .config import (
-    DEFAULT_PROFILE, MODEL_PROFILES, MODEL_REQUEST_OPTIONS,
+    DEFAULT_PROFILE, MODEL_PROFILES, MODEL_REQUEST_OPTIONS, THINKING_ALLOWANCE,
     get_model, compute_cost
 )
 
@@ -34,6 +34,8 @@ class RunContext:
         (system, messages, max_tokens) — only the model and per-model options are added.
         """
         model = get_model(role, self.profile)
+        # Room for thinking on top of the call site's budget for the visible answer
+        request["max_tokens"] = request["max_tokens"] + THINKING_ALLOWANCE.get(model, 0)
         client = Anthropic(api_key=self.api_key or os.environ["ANTHROPIC_API_KEY"])
         response = client.messages.create(model=model, **MODEL_REQUEST_OPTIONS.get(model, {}), **request)
 

@@ -130,6 +130,7 @@ Per team, per round, in order (PRO then CON):
 - **Profiles:** `MODEL_PROFILES` maps every role to a model: `all_haiku` (default), `all_sonnet` (`claude-sonnet-5` debaters), `all_opus` (`claude-opus-5-5` debaters). Use `get_model(role, profile)`; it raises on an unknown role or profile.
 - **Judges are fixed (owner decision):** `JUDGE_ROLES` = moderator, extremity_scorer, position_scorer, report always use `JUDGE_MODEL` (`claude-haiku-4-5`) in every profile, so a comparison changes only who debates, not who grades. Profile names describe the debating roles only; the transcript's `model_config.roles` records the exact mapping.
 - **Thinking policy (`MODEL_REQUEST_OPTIONS`):** Sonnet 5 and Opus 5.5 think by default, and thinking counts against `max_tokens` (unchanged per call site), so thinking is minimized. Sonnet 5 → `thinking: disabled`; Opus 5.5 can't disable it → `output_config.effort: "low"`. Haiku sends nothing extra. Owner decision; revisit only deliberately.
+- **Thinking allowance (`THINKING_ALLOWANCE`, owner-approved):** Opus 5.5 calls get +1000 `max_tokens` on top of the call site's value (critique 300→1300, draft/synthesis 500→1500), added in `RunContext.create`. Why: in the pilot, all 6 Opus critiques hit the 300 cap with only 18-83 visible words (Haiku 118-171 words), because its effort-low thinking used up the budget. The allowance covers thinking only, so every model keeps the same room for its visible answer; unused allowance costs nothing. Opus pilot runs from before this change are invalid, so delete and re-run them.
 - **`RunContext`** (one per run, created in `run_simulation_streamed`, passed as a required keyword-only `ctx` to every LLM-calling function; never global, since sims run in threads). `ctx.create(role, round_num=, agent_id=, **request)` builds a fresh `Anthropic()` client, adds the profile's model + options, and appends to `ctx.cost_log`: `{role, model, round, agent_id, input_tokens, output_tokens, cost_usd, stop_reason}`. `agent_id` is the agent; team extremity scoring logs the team; batched calls log null.
 - **`stop_reason` in cost_log** is how truncation is detected (`"max_tokens"`). Watch it closely for Sonnet/Opus. `score_extremity` silently returns 5 on unparseable output, so truncated scorer replies would otherwise bias results invisibly.
 - **Parsing:** all call sites use `response_text(response)` (first text block, `""` if none). Identical to `content[0].text` for Haiku; required for thinking models, whose `content[0]` is a thinking block.
@@ -174,18 +175,30 @@ Per team, per round, in order (PRO then CON):
 
 ## Immediate next task (where the last session left off)
 
-**Model comparison, part 1 (runtime) is done**: profiles, per-call cost logging, seeding and the new transcript fields (see "Model profiles, cost logging, seeding" above).
+**Model comparison: runtime (profiles, cost_log, seeds) and the `model_eval/` harness are both built.** Nothing real has been run through `model_eval` yet.
 
-**Next: the `model_eval/` folder** (a separate task, not started):
-- An experiment runner that calls `run_simulation_streamed(..., model_profile=, seed=, experiment_id=, output_dir=, api_key=)` directly (not over HTTP), writing to its own output folder so runs stay out of History.
-- The owner is setting up a **separate Anthropic workspace with its own API key**, stored in `.env` as `MODEL_EVAL_API_KEY`. The model_eval runner reads it and passes it as `run_simulation_streamed(api_key=...)`. Don't overwrite `ANTHROPIC_API_KEY`, and never use it from the web app. Sonnet/Opus have their own per-model rate limits, so pace the runs.
-- Mandatory guardrails (from Week 9 principles): an explicit confirmation step, a printed cost estimate before any batch (use the measured per-role costs above × model price ratios), and no unattended scheduling.
-- Budget: the owner had ~$14 of credits left when this was written. Estimated cost per 3-round run (Haiku judges; debater cost scaled by price ratio from measured Haiku runs; Opus effort-low thinking not yet measured): Individual ≈ $0.07 Haiku / $0.11 Sonnet / $0.20-0.25 Opus; Team ≈ $0.12 / $0.21 / $0.40-0.50. The runner must print its estimate and ask before running.
-- Verify `PRICING` against Anthropic's official pricing page (currently marked unverified).
+`model_eval/` (see its README):
+- `experiments.py`: `pilot` (1 round, seed 1, ≈$0.52 baseline estimate, cap $1) and `main` (3 rounds, seeds 1-5, cap $7.50).
+- `run_experiment.py`: `python -m model_eval.run_experiment <exp> [--dry-run]`. Guardrails:
+  - prints the plan and estimate first; requires typing the experiment name; refuses without a TTY;
+  - uses only `MODEL_EVAL_API_KEY` (no fallback to `ANTHROPIC_API_KEY`);
+  - spend cap, with estimates scaled up by the worst actual/estimate overrun so far;
+  - stops the batch on the first interrupted run;
+  - resumable (interrupted runs are retried); append-only `spend_log.jsonl`;
+  - chdirs to the project root, because Chroma's `./memory_db` is relative to the working directory.
+- `estimate.py`: baseline per-role token profile from real Haiku runs (margin 1.3, Opus output ×1.5 for effort-low thinking). Once results exist, it switches to **measured** per-round and report costs (margin 1.15).
+- `summarize.py`: per mode × profile: cost, $/round, calls, truncations (debaters/judges), extremity, extremity drift, polarization (final PRO−CON position gap) and its drift. Also writes `summary.csv`.
+- Results go to `model_eval/results/<exp>/` (gitignored, not shown in History).
+- Tested with mocked API calls (full run, stop on failure and retry, cap stop, TTY refusal) and dry-runs. Not tested with real spend yet.
+
+**Next steps (owner):**
+1. Run the pilot: `python -m model_eval.run_experiment pilot`. Check that truncations are 0/0 and compare actual vs estimated cost (especially Opus).
+2. Dry-run `main`. The baseline estimate ($7.58) is just over its cap ($7.50), so it refuses; after the pilot it uses measured costs. If still over: 4 seeds, or raise the cap (the workspace limit is $8).
+3. Not yet built: any *quality* metric (argument strength / evidence use). Current metrics are cost + extremity/position only. Any LLM-judged quality metric must also use a fixed judge model.
 
 ## Roadmap (Team Mode is done; model comparison is next)
 
-1. Model comparison (Haiku vs Sonnet vs Opus). Runtime part done; model_eval/ folder is NEXT
+1. Model comparison (Haiku vs Sonnet vs Opus). Runtime + model_eval/ harness built; running the pilot is NEXT
 2. Hosted ChromaDB migration (required before deploy — local `PersistentClient` won't survive Render/Railway's ephemeral disk)
 3. Week 9 — Automation: Claude Code refactor pass, batch runner script, GitHub Actions — **all with mandatory safety guardrails**: no blind cron scheduling, explicit confirmation required before any batch run, Anthropic Console spending limit set BEFORE automation work begins (owner has explicitly stated concern about unattended overnight API spend)
 4. Future research: principled inter-agent influence algorithm (see point 5 above)

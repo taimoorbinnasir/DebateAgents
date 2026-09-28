@@ -55,6 +55,14 @@ MODEL_REQUEST_OPTIONS = {
     "claude-opus-5-5":  {"output_config": {"effort": "low"}},
 }
 
+# Extra max_tokens for models that still think. Opus 5.5 thinks even at effort "low", and
+# thinking counts against max_tokens: in the pilot, all 6 Opus critiques (max_tokens=300) hit
+# the cap with only 18-83 visible words (Haiku: 118-171). The allowance covers thinking only,
+# so every model keeps the same room for its visible answer. Unused allowance costs nothing.
+THINKING_ALLOWANCE = {
+    "claude-opus-5-5": 1000,
+}
+
 
 def get_model(role: str, profile: str) -> str:
     if profile not in MODEL_PROFILES:
