@@ -2,6 +2,7 @@ from anthropic import Anthropic
 import os, sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from .config import LANGUAGE_INSTRUCTION
+from .run_context import response_text
 
 AGENT_PARAMS = {
     "pro_hardliner": {
@@ -190,10 +191,10 @@ Debate rules:
 
 
 def moderator_summary(shared_history: list, round_num: int,
-                      statements_per_round: int = len(AGENT_PARAMS), team_mode: bool = False) -> str:
+                      statements_per_round: int = len(AGENT_PARAMS), team_mode: bool = False,
+                      *, ctx) -> str:
     """statements_per_round must match the mode (6 individual, 2 team) — otherwise the
     slice pulls in the previous round and the moderator's own earlier summary."""
-    mod_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     last_round = shared_history[-statements_per_round:]
 
     if team_mode:
@@ -208,9 +209,9 @@ not by individual names.
         framing = ""
         drift = "- Whether any position drift occurred"
 
-    response = mod_client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=300,
+    response = ctx.create(
+        "moderator", round_num=round_num,
+        max_tokens=500,  # was 300: truncated mid-sentence on Haiku (263-300 tokens used)
         system=f"""You are a neutral academic moderator evaluating a debate.
 Assess only the arguments made. Be brief and analytical.
 {LANGUAGE_INSTRUCTION}""",
@@ -225,6 +226,6 @@ In 3-4 sentences identify:
 {drift}"""}]
     )
 
-    summary = response.content[0].text
+    summary = response_text(response)
     print(f"\n📋 MODERATOR (Round {round_num}): {summary}")
     return summary

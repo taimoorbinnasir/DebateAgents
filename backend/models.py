@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 # ── User opinion ──────────────────────────────────
@@ -12,6 +12,8 @@ class SimulationRequest(BaseModel):
     topic: str
     max_rounds: int = 5
     mode: str = "individual"
+    model_profile: str = "all_haiku"        # see shared/config.py MODEL_PROFILES
+    seed:          Optional[int] = None     # reproducible turn/presenter order
 
 
 # ── Per-message ────────────────────────────────────
@@ -62,6 +64,14 @@ class SimulationTranscript(BaseModel):
     statements:      list = []   # structured statements with sources
     presenter_log:   dict = {}   # team mode: {"pro": [agent_id per round], "con": [...]}
     brainstorm_log:  list = []   # team mode: per team per round drafts + critiques
+    # Model comparison — absent on transcripts saved before these existed
+    # `model_config` is reserved by Pydantic v2 (class configuration), so the attribute is
+    # named differently and exposed/accepted under the alias "model_config"
+    run_model_config: dict = Field(default_factory=dict, alias="model_config")  # {"profile", "roles"}
+    cost_log:        list = []   # one entry per LLM call
+    total_cost_usd:  Optional[float] = None
+    experiment_id:   Optional[str] = None
+    seed:            Optional[int] = None
 
 
 # ── Simulation list item ───────────────────────────

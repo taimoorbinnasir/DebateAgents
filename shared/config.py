@@ -1,4 +1,12 @@
 import hashlib
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load the project's .env explicitly (ANTHROPIC_API_KEY, SERP_API_KEY, MODEL_EVAL_API_KEY).
+# Every entry point imports this module, so keys no longer depend on an incidental import
+# chain reaching shared/tools.py. Absolute path → works from any working directory.
+# Doesn't override variables already set in the environment.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # Basic
 MODEL = "claude-haiku-4-5"
@@ -6,9 +14,71 @@ MAX_TOKENS = 500
 MEMORY_DB_PATH = "./memory_db"
 COLLECTION_NAME = "agent_memory"
 
-# Pricing for cost tracking
-INPUT_COST_PER_M = 0.8
-OUTPUT_COST_PER_M = 4.0
+# ===================== MODELS PER ROLE =====================
+# Every LLM call in a simulation belongs to one role. A profile maps each role to a model.
+ROLES = (
+    "draft",             # team mode: each member's private proposal
+    "critique",          # team mode: each member's critique of the proposals
+    "synthesis",         # team mode: presenter's single public statement
+    "agent_turn",        # individual mode: one agent's public statement
+    "moderator",         # per-round moderator summary
+    "extremity_scorer",  # per-statement extremity score
+    "position_scorer",   # per-round batched position scores
+    "report",            # final analysis report
+)
+
+DEFAULT_PROFILE = "all_haiku"
+
+# "Judges" grade the debate or steer it from outside (the moderator's summary goes into the
+# shared history). They stay on ONE model in every profile, so a comparison changes only who
+# debates — not who grades. Profile names describe the debating roles.
+JUDGE_ROLES = ("moderator", "extremity_scorer", "position_scorer", "report")
+JUDGE_MODEL = "claude-haiku-4-5"
+
+
+def _profile(debater_model: str) -> dict:
+    return {role: JUDGE_MODEL if role in JUDGE_ROLES else debater_model for role in ROLES}
+
+
+MODEL_PROFILES = {
+    "all_haiku":  _profile("claude-haiku-4-5"),  # default — current behavior
+    "all_sonnet": _profile("claude-sonnet-5"),   # Sonnet debaters, Haiku judges
+    "all_opus":   _profile("claude-opus-5-5"),   # Opus debaters, Haiku judges
+}
+
+# Extra request options per model. Sonnet 5 and Opus 5.5 think by default, and thinking
+# tokens count against max_tokens (which stays unchanged per call site), so thinking is
+# minimized: disabled on Sonnet 5; Opus 5.5 can't disable it, so effort "low" is the floor.
+MODEL_REQUEST_OPTIONS = {
+    "claude-haiku-4-5": {},
+    "claude-sonnet-5":  {"thinking": {"type": "disabled"}},
+    "claude-opus-5-5":  {"output_config": {"effort": "low"}},
+}
+
+
+def get_model(role: str, profile: str) -> str:
+    if profile not in MODEL_PROFILES:
+        raise ValueError(f"Unknown model profile '{profile}'. Known profiles: {sorted(MODEL_PROFILES)}")
+    if role not in MODEL_PROFILES[profile]:
+        raise ValueError(f"Unknown role '{role}' for profile '{profile}'. Known roles: {list(ROLES)}")
+    return MODEL_PROFILES[profile][role]
+
+
+# ===================== PRICING =====================
+# USD per million tokens. UNVERIFIED: taken from third-party sources — check against
+# Anthropic's official pricing page before relying on cost figures.
+PRICING = {
+    "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
+    "claude-sonnet-5":  {"input": 2.00, "output": 10.00},
+    "claude-opus-5-5":  {"input": 4.00, "output": 20.00},
+}
+
+
+def compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    if model not in PRICING:
+        raise ValueError(f"No pricing for model '{model}'. Add it to PRICING in shared/config.py")
+    rates = PRICING[model]
+    return (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
 
 # Debate sim settings (you'll use these in Week 5)
 NUM_ROUNDS = 10

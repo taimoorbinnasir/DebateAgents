@@ -1,10 +1,9 @@
 import sys, os, json, re
 from datetime import datetime
-from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from shared.agents import AGENT_PARAMS
 from shared.config import LANGUAGE_INSTRUCTION
-from shared.tools import llm
+from shared.run_context import response_text
 
 
 def display_name(log_key: str) -> str:
@@ -15,13 +14,21 @@ def display_name(log_key: str) -> str:
 
 
 # ===================== EXTREMITY =====================
-def score_extremity(agent_id: str, statement: str) -> int:
-    response = llm.invoke(
-        f"Rate the extremity/hostility of this statement from 1 (very moderate) "
-        f"to 10 (very extreme). Return only a number.\nStatement: {statement}"
+# Scorers call the SDK directly (previously the LangChain `llm`). max_tokens=1024 is the
+# ChatAnthropic default they were sent with, so the requests are unchanged.
+SCORER_MAX_TOKENS = 1024
+
+
+def score_extremity(agent_id: str, statement: str, *, ctx, round_num: int | None = None) -> int:
+    response = ctx.create(
+        "extremity_scorer", round_num=round_num, agent_id=agent_id,
+        max_tokens=SCORER_MAX_TOKENS,
+        messages=[{"role": "user", "content":
+            f"Rate the extremity/hostility of this statement from 1 (very moderate) "
+            f"to 10 (very extreme). Return only a number.\nStatement: {statement}"}]
     )
     try:
-        return int(response.content.strip())
+        return int(response_text(response).strip())
     except:
         return 5
 
@@ -45,7 +52,7 @@ def print_extremity_chart(extremity_log: dict):
 
 
 # ===================== BATCH SCORE =====================
-def score_positions_batch(round_statements: dict, topic: str) -> dict:
+def score_positions_batch(round_statements: dict, topic: str, *, ctx, round_num: int | None = None) -> dict:
     """One LLM call scores all agents' positions for a round.
     round_statements: {agent_id: statement_text}
     Returns: {agent_id: position_score}
@@ -62,11 +69,15 @@ Example format: {{"pro_hardliner": 8, "con_hardliner": -9}}
 Statements:
 {lines}"""
 
-    response = llm.invoke(prompt)
+    response = ctx.create(
+        "position_scorer", round_num=round_num,
+        max_tokens=SCORER_MAX_TOKENS,
+        messages=[{"role": "user", "content": prompt}]
+    )
     
     try:
         # Strip markdown fences if present — same fix you used for fact extraction
-        raw = response.content.strip()
+        raw = response_text(response).strip()
         raw = re.sub(r"```(?:json)?\n?", "", raw).strip()
         return json.loads(raw)
     except (json.JSONDecodeError, AttributeError):
@@ -224,7 +235,10 @@ def conclude_simulation(topic: str, shared_history: list,
                         extremity_log: dict, stop_reason: str, session_id: str,
                         position_log: dict = None, influence_edges: list = None,
                         structured_statements: list = None, mode: str = "individual",
-                        presenter_log: dict = None, brainstorm_log: list = None):
+                        presenter_log: dict = None, brainstorm_log: list = None,
+                        *, ctx, experiment_id: str | None = None, output_dir: str | None = None):
+    """output_dir defaults to Resources/simulations/ (what the History page reads);
+    experiment runs pass their own folder so they don't flood History."""
     transcript    = "\n".join(shared_history)
     scores_text   = _format_log(extremity_log)
     position_text = _format_log(position_log)
@@ -238,16 +252,15 @@ def conclude_simulation(topic: str, shared_history: list,
 
     print(f"\n{'='*60}\nGENERATING ANALYSIS REPORT...\n{'='*60}\n")
 
-    report_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    report_response = report_client.messages.create(
-        model="claude-haiku-4-5",
+    report_response = ctx.create(
+        "report",
         max_tokens=1200,
         messages=[{"role": "user", "content": prompt}]
     )
-    report_content = report_response.content[0].text
+    report_content = response_text(report_response)
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    output_dir   = os.path.join(project_root, "Resources", "simulations")
+    output_dir   = output_dir or os.path.join(project_root, "Resources", "simulations")
     os.makedirs(output_dir, exist_ok=True)
 
     transcript_path = os.path.join(output_dir, f"transcript_{session_id}.json")
@@ -262,7 +275,13 @@ def conclude_simulation(topic: str, shared_history: list,
         "position_log":    position_log or {},
         "influence_edges": influence_edges or [],
         "transcript":      shared_history,
-        "statements":      structured_statements or []
+        "statements":      structured_statements or [],
+        # Model comparison: what produced this run, and what it cost (report call included)
+        "model_config":    ctx.model_config(),
+        "cost_log":        ctx.cost_log,
+        "total_cost_usd":  round(ctx.total_cost(), 6),
+        "experiment_id":   experiment_id,
+        "seed":            ctx.seed,
     }
     if mode == "team":
         saved["presenter_log"]  = presenter_log or {}

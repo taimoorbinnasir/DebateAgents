@@ -50,7 +50,8 @@ def get_all_simulations() -> list[dict]:
     return sorted(results, key=lambda r: r["saved_at"], reverse=True)  # newest first
 
 
-def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "individual"):
+def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "individual",
+                     model_profile: str = "all_haiku", seed: int | None = None):
     """Initialize state and launch simulation in background thread."""
     
     # Per-session event queue — SSE reads from this
@@ -60,6 +61,8 @@ def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "
         "session_id":    session_id,
         "topic":         topic,
         "mode":          mode,
+        "model_profile": model_profile,
+        "seed":          seed,
         "status":        "running",
         "current_round": 0,
         "max_rounds":    max_rounds,
@@ -76,14 +79,15 @@ def start_simulation(session_id: str, topic: str, max_rounds: int, mode: str = "
     # Run simulation in background thread
     thread = threading.Thread(
         target=_run_simulation_thread,
-        args=(session_id, topic, max_rounds, mode, event_queue),
+        args=(session_id, topic, max_rounds, mode, event_queue, model_profile, seed),
         daemon=True
     )
     thread.start()
 
 
 def _run_simulation_thread(session_id: str, topic: str, 
-                            max_rounds: int, mode: str, event_queue: queue.Queue):
+                            max_rounds: int, mode: str, event_queue: queue.Queue,
+                            model_profile: str, seed: int | None):
     """Runs inside a background thread. Pushes events to queue."""
     try:
         # Import here to avoid circular imports at module load time
@@ -92,7 +96,9 @@ def _run_simulation_thread(session_id: str, topic: str,
             max_rounds=max_rounds,
             session_id=session_id,
             mode=mode,
-            event_queue=event_queue
+            event_queue=event_queue,
+            model_profile=model_profile,
+            seed=seed
         )
     except Exception as e:
         _simulations[session_id]["status"] = "error"

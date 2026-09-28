@@ -34,7 +34,7 @@ Structured analysis report generated and saved (session_id-keyed filename)
 - Frontend: React (Vite) + Tailwind, react-force-graph-2d for influence map, recharts for charts, jsPDF + html2canvas for export
 - Memory: ChromaDB (local `PersistentClient`, **NOT yet migrated to hosted** — will break on deploy due to ephemeral disk)
 - Embeddings: `sentence-transformers` (`all-MiniLM-L6-v2`)
-- LLM: Claude Haiku via Anthropic API, isolated `Anthropic()` client calls per agent turn (not LangChain — LangChain was abandoned early due to version instability)
+- LLM: Anthropic API, isolated `Anthropic()` client per call (made inside `RunContext.create`). Model per role comes from a **model profile** (default `all_haiku`). LangChain was abandoned early due to version instability; the scorers were its last live users and now call the SDK directly
 
 ## Key files
 
@@ -43,13 +43,17 @@ DebateAgents/
 ├── shared/
 │   ├── agents.py        — AGENT_PARAMS (6 personas), TEAM_COMPOSITION, build_system_prompt(), REASONING_STYLES,
 │   │                      moderator_summary(shared_history, round_num, statements_per_round=6, team_mode=False)
-│   ├── config.py         — topic_key() hashing, LANGUAGE_INSTRUCTION constant
+│   ├── config.py         — topic_key() hashing, LANGUAGE_INSTRUCTION, ROLES, MODEL_PROFILES, get_model(),
+│   │                        MODEL_REQUEST_OPTIONS (per-model thinking/effort), PRICING, compute_cost()
+│   ├── run_context.py     — RunContext (profile, cost_log, seeded rng, api_key) + ctx.create(role, ...);
+│   │                        response_text() (first text block)
 │   ├── memory.py          — ChromaDB client, embedder, store/recall functions (agent + team channel scopes);
 │   │                        store_team_draft(..., kind="draft"|"critique") — kind is part of the id
 │   ├── chunker.py          — chunk_recursive(), is_valid_chunk() (content quality filter)
 │   ├── ingest.py            — web search → chunk → embed → store, topic-scoped
 │   ├── retrieve.py           — retrieve_agent_sources() with distance filtering
-│   └── tools.py                — shared LLM instance (legacy LangChain remnant, still used by scoring calls)
+│   └── tools.py                — legacy LangChain `llm`; no longer used by the live simulation. Still the
+│                                  file that calls load_dotenv() (reached via ingest → web_rag → tools)
 ├── Week5/
 │   ├── DebateAgents.py    — CORE SIMULATION FILE: run_individual_round_loop, run_team_round_loop,
 │   │                         run_simulation_streamed (mode dispatcher), agent_respond,
@@ -121,6 +125,22 @@ Per team, per round, in order (PRO then CON):
 - **Feed scrolling (`DebateFeed`):** follows new content only if the reader is within 60px of the bottom (instant scroll, not smooth, so it doesn't misread its own scroll as "scrolled up"); otherwise shows a "↓ N new" / "New activity" button.
 - **Layout:** chat-style feed (PRO left, CON right) in both modes.
 
+### Model profiles, cost logging, seeding (runtime for model comparison)
+- **Roles** (`shared/config.py` `ROLES`): `draft`, `critique`, `synthesis` (team), `agent_turn` (individual), `moderator`, `extremity_scorer`, `position_scorer`, `report`. Research makes no LLM calls (the search query is a template).
+- **Profiles:** `MODEL_PROFILES` maps every role to a model: `all_haiku` (default), `all_sonnet` (`claude-sonnet-5` debaters), `all_opus` (`claude-opus-5-5` debaters). Use `get_model(role, profile)`; it raises on an unknown role or profile.
+- **Judges are fixed (owner decision):** `JUDGE_ROLES` = moderator, extremity_scorer, position_scorer, report always use `JUDGE_MODEL` (`claude-haiku-4-5`) in every profile, so a comparison changes only who debates, not who grades. Profile names describe the debating roles only; the transcript's `model_config.roles` records the exact mapping.
+- **Thinking policy (`MODEL_REQUEST_OPTIONS`):** Sonnet 5 and Opus 5.5 think by default, and thinking counts against `max_tokens` (unchanged per call site), so thinking is minimized. Sonnet 5 → `thinking: disabled`; Opus 5.5 can't disable it → `output_config.effort: "low"`. Haiku sends nothing extra. Owner decision; revisit only deliberately.
+- **`RunContext`** (one per run, created in `run_simulation_streamed`, passed as a required keyword-only `ctx` to every LLM-calling function; never global, since sims run in threads). `ctx.create(role, round_num=, agent_id=, **request)` builds a fresh `Anthropic()` client, adds the profile's model + options, and appends to `ctx.cost_log`: `{role, model, round, agent_id, input_tokens, output_tokens, cost_usd, stop_reason}`. `agent_id` is the agent; team extremity scoring logs the team; batched calls log null.
+- **`stop_reason` in cost_log** is how truncation is detected (`"max_tokens"`). Watch it closely for Sonnet/Opus. `score_extremity` silently returns 5 on unparseable output, so truncated scorer replies would otherwise bias results invisibly.
+- **Parsing:** all call sites use `response_text(response)` (first text block, `""` if none). Identical to `content[0].text` for Haiku; required for thinking models, whose `content[0]` is a thinking block.
+- **Scorers:** direct SDK calls with `max_tokens=SCORER_MAX_TOKENS` (1024, the langchain-anthropic 0.1.23 default they previously ran with; no temperature), so the requests are unchanged.
+- **Seed:** `run_simulation_streamed(..., seed=N)` → `RunContext.rng = random.Random(N)`, else the global `random` (unseeded behavior unchanged). It controls: Individual turn-order shuffles, the Team presenter offset, and the proposal/critique order shuffle inside team prompts (`format_team_contributions`). It does NOT make LLM outputs deterministic.
+- **API key:** `RunContext.api_key` (None → `ANTHROPIC_API_KEY`). Intended for model_eval to use its own workspace key per run. Deliberately not exposed over HTTP.
+- **Saved transcripts** now also have `model_config` (`{profile, roles}`), `cost_log` (report call included), `total_cost_usd`, `experiment_id` (null unless set) and `seed`. `conclude_simulation(..., output_dir=None)` defaults to `Resources/simulations/`; experiment runs should pass their own folder so they don't appear in History.
+- **API:** `SimulationRequest` has `model_profile` (default `all_haiku`, unknown → 400 in `main.py` before the thread starts) and `seed`; verified end-to-end to reach `run_simulation_streamed`. `experiment_id`, `output_dir` and `api_key` are Python-only parameters of `run_simulation_streamed`.
+- **Pydantic gotcha:** `model_config` is reserved in Pydantic v2. `SimulationTranscript` stores it as `run_model_config` with `alias="model_config"` (the API still returns `model_config`). Construct it via `**{"model_config": ...}`.
+- **Measured on Haiku (1 round, "AI regulation", real runs):** Individual 15 calls, ≈$0.023 (agent_turn 58%, report 16%, moderator 12%). Team 19 calls, ≈$0.037 (critique 37%, draft 28%, synthesis 18%). Per round: 14 calls Individual, 18 Team; plus 1 report per run.
+
 ## Critical architectural decisions and WHY (do not relitigate without cause)
 
 1. **Isolated API contexts per agent** — each agent turn is a fresh `Anthropic()` client call, not a shared conversation thread. Prevents one agent's response/refusal from contaminating others' context.
@@ -140,6 +160,9 @@ Per team, per round, in order (PRO then CON):
 ## Known non-blocking issues
 - (Resolved) PDF export final-line clipping — was fixed.
 - ESLint flags unused `_` variables in IndividualMode.jsx / TeamMode.jsx, and a missing-dependency warning on useSimulation's mount effect (all pre-existing, harmless).
+- **Moderator `max_tokens` raised 300 → 500 (owner decision):** at 300 it was truncated mid-sentence even on Haiku (263-300 tokens used in 4 runs). Moderator summaries in runs saved before this change may be cut short.
+- `.env` is loaded explicitly in `shared/config.py` (absolute path to the project `.env`, doesn't override existing env vars). Every entry point imports config. `shared/tools.py` still calls `load_dotenv()` too, which is harmless.
+- (Owner: don't delete yet.) The legacy CLI `run_simulation()` in `Week5/DebateAgents.py` (used by `__main__`) is broken: it loops over `turn_order` before defining it, calls `agent_respond` without `session_id`/`ctx`, and uses the global `random`. Not on any live path (the server uses `run_simulation_streamed`).
 - `index.css` sets `text-align: center` on `#root` (Vite template leftover). Set alignment explicitly (`text-left`) on new elements rather than changing the global rule.
 - `shared/__pycache__/*.pyc` is tracked in git; consider adding `__pycache__/` to .gitignore.
 - Moderator summaries generated before the plain-language fix were produced without LANGUAGE_INSTRUCTION (a literal placeholder was being sent), so they aren't directly comparable with later runs.
@@ -151,14 +174,18 @@ Per team, per round, in order (PRO then CON):
 
 ## Immediate next task (where the last session left off)
 
-**Week 8 is complete** (owner-confirmed). Next is **model comparison** (item 1 below):
-- Haiku vs Sonnet vs Opus on debate quality, on short runs (3-4 rounds) to control cost.
-- Team Mode costs ~18 LLM calls per round vs ~12 for Individual Mode; confirm with the owner which mode(s) to compare, and the budget, before running anything.
-- The model is hardcoded as `"claude-haiku-4-5"` in 7 places: `Week5/DebateAgents.py` (draft, critique, synthesis, agent_respond), `Week5/eval.py` (report), `shared/agents.py` (moderator) and `shared/tools.py` (the LangChain `llm` used for extremity and position scoring). Making the model configurable is the first step. Decide whether the scorers and the moderator should stay fixed on one model so that scores remain comparable across the models being tested.
+**Model comparison, part 1 (runtime) is done**: profiles, per-call cost logging, seeding and the new transcript fields (see "Model profiles, cost logging, seeding" above).
+
+**Next: the `model_eval/` folder** (a separate task, not started):
+- An experiment runner that calls `run_simulation_streamed(..., model_profile=, seed=, experiment_id=, output_dir=, api_key=)` directly (not over HTTP), writing to its own output folder so runs stay out of History.
+- The owner is setting up a **separate Anthropic workspace with its own API key**, stored in `.env` as `MODEL_EVAL_API_KEY`. The model_eval runner reads it and passes it as `run_simulation_streamed(api_key=...)`. Don't overwrite `ANTHROPIC_API_KEY`, and never use it from the web app. Sonnet/Opus have their own per-model rate limits, so pace the runs.
+- Mandatory guardrails (from Week 9 principles): an explicit confirmation step, a printed cost estimate before any batch (use the measured per-role costs above × model price ratios), and no unattended scheduling.
+- Budget: the owner had ~$14 of credits left when this was written. Estimated cost per 3-round run (Haiku judges; debater cost scaled by price ratio from measured Haiku runs; Opus effort-low thinking not yet measured): Individual ≈ $0.07 Haiku / $0.11 Sonnet / $0.20-0.25 Opus; Team ≈ $0.12 / $0.21 / $0.40-0.50. The runner must print its estimate and ask before running.
+- Verify `PRICING` against Anthropic's official pricing page (currently marked unverified).
 
 ## Roadmap (Team Mode is done; model comparison is next)
 
-1. Model comparison (Haiku vs Sonnet vs Opus) — NEXT, now that Team Mode is stable
+1. Model comparison (Haiku vs Sonnet vs Opus). Runtime part done; model_eval/ folder is NEXT
 2. Hosted ChromaDB migration (required before deploy — local `PersistentClient` won't survive Render/Railway's ephemeral disk)
 3. Week 9 — Automation: Claude Code refactor pass, batch runner script, GitHub Actions — **all with mandatory safety guardrails**: no blind cron scheduling, explicit confirmation required before any batch run, Anthropic Console spending limit set BEFORE automation work begins (owner has explicitly stated concern about unattended overnight API spend)
 4. Future research: principled inter-agent influence algorithm (see point 5 above)

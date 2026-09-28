@@ -1,13 +1,13 @@
 import sys, os, random, uuid, json, re
 import numpy as np
 import queue as q
-from anthropic import Anthropic
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.agents import AGENT_PARAMS, TEAM_COMPOSITION, build_system_prompt, moderator_summary
 from shared.ingest import ingest_agent_sources
 from shared.retrieve import retrieve_agent_sources
-from shared.tools import llm
+from shared.config import DEFAULT_PROFILE
+from shared.run_context import RunContext, response_text
 from shared.memory import (
     store_agent_statement, recall_agent_history, verify_source_usage,
     store_team_draft, embedder
@@ -24,7 +24,8 @@ from .eval import (
     score_extremity,
     conclude_simulation,
     score_positions_batch,
-    compute_influence_edges
+    compute_influence_edges,
+    SCORER_MAX_TOKENS
 )
 
 
@@ -38,21 +39,21 @@ def other_team(team_name: str) -> str:
     return "con" if team_name == "pro" else "pro"
 
 
-def format_team_contributions(items: list[dict], key: str) -> str:
-    """Shuffled so no member's contribution is always read first (position bias)."""
-    shuffled = random.sample(items, len(items))
+def format_team_contributions(items: list[dict], key: str, rng) -> str:
+    """Shuffled so no member's contribution is always read first (position bias).
+    rng is the run's RunContext.rng, so a seeded run shuffles the same way every time."""
+    shuffled = rng.sample(items, len(items))
     return "\n\n".join([f"[{AGENT_PARAMS[i['agent_id']]['name']}]: {i[key]}" for i in shuffled])
 
 
 # Draft argument for team mode
 def agent_draft_argument(agent_id: str, team_name: str, shared_history: list,
-                         round_num: int, session_id: str) -> tuple[str, list[dict]]:
+                         round_num: int, session_id: str, *, ctx) -> tuple[str, list[dict]]:
     """
     Step 1: this agent's private proposal for what the team should argue this round.
     Not spoken publicly — teammates critique it, then the presenter synthesizes.
     Returns (draft, retrieved sources) so sources can be pooled for synthesis.
     """
-    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[agent_id]
     topic = shared_history[0].replace("TOPIC: ", "").strip()
 
@@ -91,46 +92,46 @@ def agent_draft_argument(agent_id: str, team_name: str, shared_history: list,
 
     user_content = "\n\n".join(sections)
 
-    response = agent_client.messages.create(
-        model="claude-haiku-4-5",
+    response = ctx.create(
+        "draft", round_num=round_num, agent_id=agent_id,
         max_tokens=500,
         system=build_system_prompt(agent_id),
         messages=[{"role": "user", "content": user_content}]
     )
 
-    draft = response.content[0].text
+    draft = response_text(response)
     print(f"  [draft] {p['name']}: {draft[:80]}...")
 
     return draft, sources
 
 
-def agent_critique(agent_id: str, team_name: str, drafts: list[dict], opponent_stmt: str) -> str:
+def agent_critique(agent_id: str, team_name: str, drafts: list[dict], opponent_stmt: str,
+                   *, ctx, round_num: int | None = None) -> str:
     """
     Step 2: this agent reads all 3 of its team's drafts and says what to keep,
     what to drop, and what's missing. Short — it's input to synthesis, not a new draft.
     """
-    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[agent_id]
 
     user_content = f"""Opposing team's most recent argument:
 {opponent_stmt if opponent_stmt else 'No opponent statement yet — your team opens the debate.'}
 
 Your team's proposed arguments for this round (including yours):
-{format_team_contributions(drafts, 'draft')}
+{format_team_contributions(drafts, 'draft', ctx.rng)}
 
 Critique these proposals for your team as {p['name']}, in 2-4 sentences:
 the single strongest point to keep, the weakest point to drop, and what is missing
 (e.g. the best rebuttal to the opposing team). Be specific and name which teammate's point you mean.
 {TEAM_ADDRESS_INSTRUCTION}"""
 
-    response = agent_client.messages.create(
-        model="claude-haiku-4-5",
+    response = ctx.create(
+        "critique", round_num=round_num, agent_id=agent_id,
         max_tokens=300,
         system=build_system_prompt(agent_id),
         messages=[{"role": "user", "content": user_content}]
     )
 
-    critique = response.content[0].text
+    critique = response_text(response)
     print(f"  [critique] {p['name']}: {critique[:80]}...")
 
     return critique
@@ -138,12 +139,11 @@ the single strongest point to keep, the weakest point to drop, and what is missi
 
 def synthesize_team_statement(presenter_id: str, team_name: str, drafts: list[dict],
                               critiques: list[dict], sources: list[dict],
-                              shared_history: list) -> tuple[str, list[dict]]:
+                              shared_history: list, *, ctx, round_num: int | None = None) -> tuple[str, list[dict]]:
     """
     Step 3: this round's presenter writes the team's ONE public statement,
     in their own persona voice, from all drafts + critiques + pooled sources.
     """
-    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[presenter_id]
 
     last_opponent = get_last_team_statement(other_team(team_name), shared_history)
@@ -162,8 +162,8 @@ def synthesize_team_statement(presenter_id: str, team_name: str, drafts: list[di
         f"Opposing team's most recent argument to address:\n"
         f"{last_opponent if last_opponent else 'No opponent statement yet — open the debate.'}"
     )
-    sections.append(f"Your team's proposals:\n{format_team_contributions(drafts, 'draft')}")
-    sections.append(f"Your team's critiques of those proposals:\n{format_team_contributions(critiques, 'critique')}")
+    sections.append(f"Your team's proposals:\n{format_team_contributions(drafts, 'draft', ctx.rng)}")
+    sections.append(f"Your team's critiques of those proposals:\n{format_team_contributions(critiques, 'critique', ctx.rng)}")
     sections.append(
         f"You are presenting for your team this round. Write your team's single public "
         f"statement in your own voice as {p['name']}, in 3-5 sentences. Combine the strongest "
@@ -172,14 +172,14 @@ def synthesize_team_statement(presenter_id: str, team_name: str, drafts: list[di
         f"{TEAM_ADDRESS_INSTRUCTION}"
     )
 
-    response = agent_client.messages.create(
-        model="claude-haiku-4-5",
+    response = ctx.create(
+        "synthesis", round_num=round_num, agent_id=presenter_id,
         max_tokens=500,
         system=build_system_prompt(presenter_id),
         messages=[{"role": "user", "content": "\n\n".join(sections)}]
     )
 
-    statement = response.content[0].text
+    statement = response_text(response)
     print(f"  [synthesis] {p['name']}: {statement[:80]}...")
 
     return statement, to_citations(verify_source_usage(statement, sources))
@@ -194,7 +194,7 @@ def to_citations(verified_sources: list[dict]) -> list[dict]:
 
 
 def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
-                    round_num: int, session_id: str, push=None) -> dict:
+                    round_num: int, session_id: str, push=None, *, ctx) -> dict:
     """
     Draft (x3, isolated) → Critique (x3, each sees all drafts) → Synthesize (x1, presenter).
     Drafts and critiques are stored in the team's private channel, and streamed via push()
@@ -212,7 +212,7 @@ def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
 
     drafts, pooled_sources, seen_urls = [], [], set()
     for agent_id in agent_ids:
-        draft, sources = agent_draft_argument(agent_id, team_name, shared_history, round_num, session_id)
+        draft, sources = agent_draft_argument(agent_id, team_name, shared_history, round_num, session_id, ctx=ctx)
         store_team_draft(team_name, agent_id, draft, round_num, session_id, kind="draft")
         used_sources = verify_source_usage(draft, sources)
         drafts.append({"agent_id": agent_id, "draft": draft, "sources": to_citations(used_sources)})
@@ -228,7 +228,7 @@ def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
 
     critiques = []
     for agent_id in agent_ids:
-        critique = agent_critique(agent_id, team_name, drafts, opponent_stmt)
+        critique = agent_critique(agent_id, team_name, drafts, opponent_stmt, ctx=ctx, round_num=round_num)
         store_team_draft(team_name, agent_id, critique, round_num, session_id, kind="critique")
         critiques.append({"agent_id": agent_id, "critique": critique})
         push({
@@ -238,7 +238,8 @@ def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
         })
 
     statement, cited_sources = synthesize_team_statement(
-        presenter_id, team_name, drafts, critiques, pooled_sources, shared_history
+        presenter_id, team_name, drafts, critiques, pooled_sources, shared_history,
+        ctx=ctx, round_num=round_num
     )
     print(f"  🎤 Presenter for {team_name.upper()}: {AGENT_PARAMS[presenter_id]['name']}")
 
@@ -253,9 +254,8 @@ def team_brainstorm(team_name: str, presenter_id: str, shared_history: list,
 
 
 # ===================== AGENT RESPONSE =====================
-def agent_respond(agent_id: str, shared_history: list, round_num: int, session_id: str) -> str:
+def agent_respond(agent_id: str, shared_history: list, round_num: int, session_id: str, *, ctx) -> str:
     topic = shared_history[0].replace("TOPIC: ", "").strip()
-    agent_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     p = AGENT_PARAMS[agent_id]
 
     last_message = shared_history[-1] if len(shared_history) > 1 else topic
@@ -288,14 +288,14 @@ def agent_respond(agent_id: str, shared_history: list, round_num: int, session_i
 
     user_content = "\n\n".join(sections)
 
-    response = agent_client.messages.create(
-        model="claude-haiku-4-5",
+    response = ctx.create(
+        "agent_turn", round_num=round_num, agent_id=agent_id,
         max_tokens=500,
         system=build_system_prompt(agent_id),
         messages=[{"role": "user", "content": user_content}]
     )
 
-    reply = response.content[0].text
+    reply = response_text(response)
 
     # Word-by-word print to simulate streaming
     print(f"\n{p['name']} ({p['stance'].upper()}): ", end="", flush=True)
@@ -372,7 +372,7 @@ def run_simulation(topic: str, max_rounds: int = 10):
 # ===================== SIMULATION LOOP FOR BACKEND =====================
 # Simulation loop that pushes events to a queue instead of printing
 def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
-                              event_queue=None):
+                              event_queue=None, *, ctx, experiment_id=None, output_dir=None):
     # If no queue provided, fall back to print behavior
     def push(event: dict):
         from backend.manager import push_event
@@ -407,8 +407,8 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
         for round_num in range(1, max_rounds + 1):
             push({"type": "round_start", "round": round_num, "max_rounds": max_rounds})
             
-            random.shuffle(pro_agents)
-            random.shuffle(con_agents)
+            ctx.rng.shuffle(pro_agents)
+            ctx.rng.shuffle(con_agents)
             turn_order = [x for pair in zip(pro_agents, con_agents) for x in pair]
 
             round_statements = {}  # collect this round's statements for batch scoring
@@ -418,12 +418,12 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
                 last_opponent_msg = get_last_opponent_statement(agent_id, shared_history)
                 target_id = extract_agent_id_from_message(last_opponent_msg) if last_opponent_msg else None
 
-                reply, cited_sources = agent_respond(agent_id, shared_history, round_num, session_id)
+                reply, cited_sources = agent_respond(agent_id, shared_history, round_num, session_id, ctx=ctx)
                 statement = f"{AGENT_PARAMS[agent_id]['name']}: {reply}"
                 shared_history.append(statement)
                 store_agent_statement(agent_id, reply, round_num, session_id)
 
-                score = score_extremity(agent_id, reply)
+                score = score_extremity(agent_id, reply, ctx=ctx, round_num=round_num)
                 extremity_log[agent_id].append(score)
                 round_statements[agent_id] = reply
                 
@@ -450,7 +450,7 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
                 })
 
             # Batch score positions for this round — ONE call, not six
-            round_positions = score_positions_batch(round_statements, topic)
+            round_positions = score_positions_batch(round_statements, topic, ctx=ctx, round_num=round_num)
             for agent_id in AGENT_PARAMS:
                 score = round_positions.get(agent_id, 0)
                 position_log[agent_id].append(score)
@@ -458,7 +458,7 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
             push({"type": "position_update", "round": round_num, "positions": round_positions})
             
             # Moderator after each round
-            mod_text = moderator_summary(shared_history, round_num)
+            mod_text = moderator_summary(shared_history, round_num, ctx=ctx)
             shared_history.append(f"MODERATOR: {mod_text}")
             push({"type": "moderator_summary", "round": round_num, "text": mod_text})
 
@@ -486,7 +486,8 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
             })
 
         conclude_simulation(topic, shared_history, extremity_log, stop_reason, 
-                            session_id, position_log, influence_edges, structured_statements)
+                            session_id, position_log, influence_edges, structured_statements,
+                            ctx=ctx, experiment_id=experiment_id, output_dir=output_dir)
         push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 
@@ -495,7 +496,7 @@ def run_individual_round_loop(topic: str, max_rounds: int, session_id: str,
 
 
 
-def score_team_positions_batch(round_statements: dict, topic: str) -> dict:
+def score_team_positions_batch(round_statements: dict, topic: str, *, ctx, round_num: int | None = None) -> dict:
     """Same batching pattern as score_positions_batch, but keyed by team name."""
     lines = "\n".join([f"{team}: {stmt}" for team, stmt in round_statements.items()])
     
@@ -508,9 +509,13 @@ Example format: {{"pro": 8, "con": -7}}
 Statements:
 {lines}"""
 
-    response = llm.invoke(prompt)
+    response = ctx.create(
+        "position_scorer", round_num=round_num,
+        max_tokens=SCORER_MAX_TOKENS,  # the LangChain default this call used before
+        messages=[{"role": "user", "content": prompt}]
+    )
     try:
-        raw = response.content.strip()
+        raw = response_text(response).strip()
         raw = re.sub(r"```(?:json)?\n?", "", raw).strip()
         return json.loads(raw)
     except (json.JSONDecodeError, AttributeError):
@@ -542,7 +547,8 @@ def should_stop_team(shared_history: list, round_num: int, max_rounds: int) -> t
 
 
 
-def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queue=None):
+def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queue=None,
+                        *, ctx, experiment_id=None, output_dir=None):
     def push(event):
         if event_queue:
             from backend.manager import push_event
@@ -560,7 +566,7 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
 
     # Round-robin presenter with a random starting point per team, chosen once per session —
     # otherwise the hardliner (listed first) would always present round 1
-    presenter_offset = {team: random.randrange(3) for team in ["pro", "con"]}
+    presenter_offset = {team: ctx.rng.randrange(3) for team in ["pro", "con"]}
 
     all_agent_ids = TEAM_COMPOSITION["pro"] + TEAM_COMPOSITION["con"]
     push({"type": "research_start", "total_agents": len(all_agent_ids)})
@@ -580,7 +586,7 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 presenter_agent_id = members[(round_num - 1 + presenter_offset[team_name]) % len(members)]
 
                 result = team_brainstorm(team_name, presenter_agent_id, shared_history, round_num,
-                                         session_id, push=push)
+                                         session_id, push=push, ctx=ctx)
                 statement_text = result["statement"]
 
                 presenter_name = AGENT_PARAMS[presenter_agent_id]["name"]
@@ -605,7 +611,7 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 for agent_id in members:
                     store_agent_statement(agent_id, statement_text, round_num, session_id)
 
-                score = score_extremity(presenter_agent_id, statement_text)
+                score = score_extremity(team_name, statement_text, ctx=ctx, round_num=round_num)
                 team_extremity_log[team_name].append(score)
                 round_statements[team_name] = statement_text
                 
@@ -631,14 +637,15 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
                 })
             
             # Batch position scoring — ONE call for both teams this round
-            round_positions = score_team_positions_batch(round_statements, topic)
+            round_positions = score_team_positions_batch(round_statements, topic, ctx=ctx, round_num=round_num)
             for team_name in ["pro", "con"]:
                 pos = round_positions.get(team_name, 0)
                 team_position_log[team_name].append(pos)
             push({"type": "position_update", "round": round_num, "positions": round_positions})
             
             # Moderator — reuse existing function unchanged, works on shared_history regardless of mode
-            mod_text = moderator_summary(shared_history, round_num, statements_per_round=2, team_mode=True)
+            mod_text = moderator_summary(shared_history, round_num, statements_per_round=2, team_mode=True,
+                                         ctx=ctx)
             shared_history.append(f"MODERATOR: {mod_text}")
             push({"type": "moderator_summary", "round": round_num, "text": mod_text})
 
@@ -658,23 +665,32 @@ def run_team_round_loop(topic: str, max_rounds: int, session_id: str, event_queu
         # No influence edges in team mode — with 2 speakers the graph reduces to a single edge
         conclude_simulation(topic, shared_history, team_extremity_log, stop_reason,
                             session_id, team_position_log, [], structured_statements,
-                            mode="team", presenter_log=presenter_log, brainstorm_log=brainstorm_log)
+                            mode="team", presenter_log=presenter_log, brainstorm_log=brainstorm_log,
+                            ctx=ctx, experiment_id=experiment_id, output_dir=output_dir)
         push({"type": "simulation_complete", "stop_reason": stop_reason})
 
 
 
 def run_simulation_streamed(topic: str, max_rounds: int, session_id: str, 
-                             mode: str = "individual", event_queue=None):
+                             mode: str = "individual", event_queue=None,
+                             model_profile: str = DEFAULT_PROFILE, seed: int | None = None,
+                             experiment_id: str | None = None, output_dir: str | None = None,
+                             api_key: str | None = None):
     """
     Entry point — dispatches to the correct simulation mode.
     
-    mode: "individual" (default, current 6-agent behavior, unchanged) 
-          or "team" (3v3 brainstorm+presenter mode, built out in Parts 2-4)
+    mode:          "individual" (6 agents) or "team" (3v3 brainstorm + presenter)
+    model_profile: which model each role uses (shared/config.py MODEL_PROFILES)
+    seed:          makes turn order / presenter order / prompt shuffles reproducible
+    experiment_id, output_dir: for experiment runs, saved separately from History
+    api_key:       None → ANTHROPIC_API_KEY (e.g. model_eval can use its own workspace key)
     """
+    ctx = RunContext(profile=model_profile, seed=seed, api_key=api_key)
+    run_kwargs = dict(event_queue=event_queue, ctx=ctx, experiment_id=experiment_id, output_dir=output_dir)
     if mode == "team":
-        return run_team_round_loop(topic, max_rounds, session_id, event_queue=event_queue)
+        return run_team_round_loop(topic, max_rounds, session_id, **run_kwargs)
     else:
-        return run_individual_round_loop(topic, max_rounds, session_id, event_queue=event_queue)
+        return run_individual_round_loop(topic, max_rounds, session_id, **run_kwargs)
 
 
 # ===================== ENTRY POINT =====================

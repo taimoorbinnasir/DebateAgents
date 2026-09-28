@@ -9,6 +9,7 @@ from backend.models import (
 )
 import backend.manager as manager
 from Week5.eval import infer_mode
+from shared.config import MODEL_PROFILES
 from .models import UserOpinion
 from .sse import simulation_stream
 
@@ -30,8 +31,14 @@ def health():
 
 @app.post("/simulation/start")
 def start_simulation(req: SimulationRequest):
+    # Reject unknown profiles here — inside the background thread the error would only
+    # surface as a stream event after the research phase
+    if req.model_profile not in MODEL_PROFILES:
+        raise HTTPException(status_code=400,
+                            detail=f"Unknown model_profile '{req.model_profile}'. Known: {sorted(MODEL_PROFILES)}")
     session_id = str(uuid.uuid4())[:8]
-    manager.start_simulation(session_id, req.topic, req.max_rounds, req.mode)
+    manager.start_simulation(session_id, req.topic, req.max_rounds, req.mode,
+                             model_profile=req.model_profile, seed=req.seed)
     return {"session_id": session_id, "status": "started"}
 
 
@@ -138,7 +145,12 @@ def get_saved_simulation(timestamp: str):
         user_opinions=   data.get("user_opinions", []),
         statements=      data.get("statements", []),
         presenter_log=   data.get("presenter_log", {}),
-        brainstorm_log=  data.get("brainstorm_log", [])
+        brainstorm_log=  data.get("brainstorm_log", []),
+        **{"model_config": data.get("model_config", {})},  # alias; see models.py
+        cost_log=        data.get("cost_log", []),
+        total_cost_usd=  data.get("total_cost_usd"),
+        experiment_id=   data.get("experiment_id"),
+        seed=            data.get("seed")
     )
 
 
